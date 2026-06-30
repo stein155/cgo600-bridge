@@ -1,0 +1,58 @@
+name: Bug report
+description: Report a firmware, flashing, BLE, MQTT, or web UI issue
+title: "[Bug]: "
+labels: [bug]
+body:
+  - type: input
+    id: version
+    attributes:
+      label: Firmware version
+      description: Release tag or commit SHA
+      placeholder: v1.0.0 or abc1234
+    validations:
+      required: true
+  - type: input
+    id: board
+    attributes:
+      label: ESP32 board
+      placeholder: ESP32 DevKitV1, WROOM-32, etc.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Area
+      options:
+        - Flashing / first setup
+        - BLE connection
+        - MQTT / Home Assistant
+        - Web dashboard / config
+        - OTA update
+        - Other
+    validations:
+      required: true
+  - type: textarea
+    id: description
+    attributes:
+      label: What happened?
+      description: Include expected and actual behavior.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Steps to reproduce
+      placeholder: "1. Flash ...\n2. Configure ...\n3. See ..."
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Serial logs
+      description: Paste logs from 115200 baud if available.
+      render: text
+  - type: textarea
+    id: environment
+    attributes:
+      label: Environment
+      description: MQTT broker, Home Assistant version, WiFi notes, flashing method.

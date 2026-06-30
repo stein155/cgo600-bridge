@@ -1,0 +1,10 @@
+# OS
+.DS_Store
+
+# Local config / cache (never commit credentials)
+tenways_ble_cache.json
+cgo600.conf
+
+# PlatformIO
+firmware/.pio/
+firmware/.vscode/

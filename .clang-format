@@ -1,0 +1,22 @@
+# C++ style for firmware/src — mirrors the conventions in AGENTS.md.
+# Not retroactively applied to existing files; used for new code and the
+# (non-blocking) CI format check.
+---
+Language: Cpp
+BasedOnStyle: Google
+IndentWidth: 4
+TabWidth: 4
+UseTab: Never
+ColumnLimit: 100
+# Same-line opening braces (Arduino/C++ house style).
+BreakBeforeBraces: Attach
+# Pointers/refs bind to the type: `char* p`, `const uint8_t& r`.
+PointerAlignment: Left
+DerivePointerAlignment: false
+AllowShortFunctionsOnASingleLine: Inline
+AllowShortIfStatementsOnASingleLine: false
+AllowShortLoopsOnASingleLine: false
+KeepEmptyLinesAtTheStartOfBlocks: false
+SortIncludes: false
+SpaceAfterCStyleCast: false
+Cpp11BracedListStyle: true
