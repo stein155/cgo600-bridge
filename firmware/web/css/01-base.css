@@ -1,0 +1,43 @@
+* { box-sizing: border-box; }
+html, body {
+    margin: 0; padding: 0;
+    height: 100%;
+}
+html {
+    /* Paint the root canvas too — otherwise the UA's default white shows
+       through the bottom safe area below the content on iOS standalone. */
+    background-color: var(--bg);
+    background-image: var(--bg-gradient);
+}
+body {
+    font-family: var(--font-ui);
+    /* Same gradient as #root so the full window (incl. the bottom safe area)
+       is painted — no mismatched strip if #root falls short on iOS. */
+    background-color: var(--bg);
+    background-image: var(--bg-gradient);
+    color: var(--text);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overflow: hidden;
+}
+button { font-family: inherit; }
+input, select { font-family: inherit; -webkit-tap-highlight-color: transparent; }
+
+#root {
+    /* inset:0 anchors to the true viewport edges (incl. the bottom safe area)
+       when combined with viewport-fit=cover — this fills the whole screen in
+       iOS standalone, unlike 100dvh which leaves the bottom strip uncovered. */
+    position: fixed;
+    inset: 0;
+    background: var(--bg-gradient);
+}
+
+.icon-sprite { position: absolute; width: 0; height: 0; overflow: hidden; }
+.icon {
+    width: 1em; height: 1em;
+    fill: none; stroke: currentColor;
+    stroke-width: 1.75;
+    stroke-linecap: round; stroke-linejoin: round;
+    flex-shrink: 0;
+}
+.icon-bold { stroke-width: 2; }

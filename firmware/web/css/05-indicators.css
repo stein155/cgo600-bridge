@@ -1,0 +1,55 @@
+/* ===== Status dot ===== */
+.status-dot {
+    position: relative; display: inline-flex;
+    width: 10px; height: 10px;
+}
+.status-dot::before {
+    content: ''; position: absolute; inset: 0;
+    border-radius: 999px; background: currentColor;
+    box-shadow: 0 0 10px currentColor;
+}
+.status-dot.pulse::after {
+    content: ''; position: absolute; inset: -3px;
+    border-radius: 999px; background: currentColor; opacity: 0.35;
+    animation: pulseDot 1.8s ease-out infinite;
+}
+@keyframes pulseDot {
+    0% { transform: scale(0.8); opacity: 0.7; }
+    80% { transform: scale(1.8); opacity: 0; }
+    100% { transform: scale(1.8); opacity: 0; }
+}
+@keyframes pulseRing {
+    0% { transform: scale(0.6); opacity: 0.7; }
+    80% { transform: scale(1.4); opacity: 0; }
+    100% { transform: scale(1.4); opacity: 0; }
+}
+
+/* ===== Progress bar ===== */
+.bar {
+    border-radius: 999px;
+    background: var(--bar-track-bg);
+    overflow: hidden;
+    height: 8px;
+}
+.bar-fill {
+    height: 100%;
+    border-radius: 999px;
+    transition: width 400ms ease, background 200ms;
+    background: var(--success);
+}
+.bar.is-thin { height: 6px; }
+.bar.is-thick { height: 10px; }
+
+/* Battery delta bar (RideDetail) */
+.delta-bar {
+    position: relative; height: 10px; border-radius: 999px;
+    background: var(--bar-track-bg); overflow: hidden;
+}
+.delta-bar .end-fill {
+    position: absolute; left: 0; top: 0; bottom: 0;
+    background: var(--success); border-radius: 999px;
+}
+.delta-bar .used {
+    position: absolute; top: 0; bottom: 0;
+    background: var(--warning); opacity: 0.7; border-radius: 999px;
+}

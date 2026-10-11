@@ -6,7 +6,8 @@ independent hobby project — contributions are welcome.
 ## Project layout
 
 - `firmware/src/` — ESP32 firmware (C++/Arduino)
-- `firmware/data/` — embedded web UI (served from LittleFS)
+- `firmware/web/` — web UI sources; bundled and gzipped into the generated
+  `firmware/data/` by `firmware/scripts/build_web.py` on every build
 - `firmware/platformio.ini` — build configuration
 - `AGENTS.md` — detailed conventions for the firmware and important paths
 
@@ -19,7 +20,7 @@ from the repo root:
 pio run -d firmware                 # build firmware
 pio run -d firmware -t buildfs      # build the LittleFS web-UI image
 pio run -d firmware -t upload       # flash firmware over USB
-pio run -d firmware -t uploadfs     # flash web UI (needed after data/ changes)
+pio run -d firmware -t uploadfs     # flash web UI (needed after web/ changes; clears ride history)
 pio device monitor -b 115200        # serial logs
 ```
 
@@ -40,7 +41,7 @@ Over-the-air flashing works after the first USB flash:
 There is no automated firmware test suite. Validation is manual:
 
 1. `pio run -d firmware` must succeed.
-2. `pio run -d firmware -t buildfs` if web assets changed.
+2. `pio run -d firmware -t buildfs` if web assets in `firmware/web/` changed.
 3. Flash to hardware and verify serial logs, BLE connection, MQTT, and the web UI.
 
 CI builds the firmware and the filesystem image, and runs a (non-blocking)
