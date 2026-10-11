@@ -15,8 +15,7 @@ static constexpr unsigned long DISCONNECTED_SCAN_RETRY_MS = 200;
 static constexpr unsigned long DIRECT_RETRY_WHEN_SEEN_MS = 200;  // retry scan fast after failed connect
 static constexpr unsigned long TARGET_SCAN_RESTART_MS = 100;
 static constexpr unsigned long NOTIFY_STALE_WARNING_MS = 5000;
-static constexpr uint8_t CONNECT_MAX_ATTEMPTS = 1;    // fail fast, re-scan immediately
-static constexpr uint32_t CONNECT_TIMEOUT_MS = 3000;  // NimBLE v2 setConnectTimeout() takes ms
+static constexpr uint32_t CONNECT_TIMEOUT_MS = 3000;  // NimBLE v2 setConnectTimeout() takes ms; single attempt, fail fast and re-scan
 
 #ifndef BLE_GAP_DEBUG
 #define BLE_GAP_DEBUG 0
@@ -238,12 +237,14 @@ void BleClient::begin(const char* deviceName) {
     scan->setInterval(160);
     scan->setWindow(156);
 
-    _hasStoredAddr = loadAddress();
+    if (!_stateMutex) {
+        _stateMutex = xSemaphoreCreateMutex();
+    }
 
     LOGLN("[BLE] Initialized");
     _reconnectDelay = TARGET_SCAN_RESTART_MS;
     _lastReconnect = millis() - _reconnectDelay;
-    setStatus(BleStatus::DISCONNECTED, _hasStoredAddr ? "restored paired device" : "auto search enabled");
+    setStatus(BleStatus::DISCONNECTED, "auto search enabled");
     startScan();
 }
 
@@ -262,40 +263,6 @@ void BleClient::setStatus(BleStatus status, const char* reason) {
 
 void BleClient::setWifiReady(bool ready) {
     s_wifiReady = ready;
-}
-
-bool BleClient::enable() {
-    if (_client && _client->isConnected()) {
-        _client->disconnect();
-    }
-    saveAddress();         // saves the "paired" bool flag in NVS
-    _hasStoredAddr = true;
-    _deviceFound = false;
-    _reconnectDelay = DISCONNECTED_SCAN_RETRY_MS;
-    _lastReconnect = millis() - _reconnectDelay;
-    setStatus(BleStatus::DISCONNECTED, "enabled");
-    LOGLN("[BLE] Enabled — will search for bike by name or NUS service");
-    return true;
-}
-
-void BleClient::forgetPairedDevice() {
-    if (_client && _client->isConnected()) {
-        _client->disconnect();
-    }
-
-    Preferences prefs;
-    prefs.begin("ble", false);
-    prefs.remove("paired");
-    prefs.remove("addr");      // legacy key, clean up if present
-    prefs.remove("addrType");  // legacy key, clean up if present
-    prefs.end();
-
-    _hasStoredAddr = false;
-    _targetAddr = NimBLEAddress();
-    _deviceFound = false;
-    setStatus(BleStatus::IDLE, "paired device forgotten");
-    _lastReconnect = millis();
-    LOGLN("[BLE] Forgot paired bike");
 }
 
 void BleClient::onScanDevice(const NimBLEAdvertisedDevice* device) {
@@ -409,11 +376,17 @@ void BleClient::loop() {
 
         case BleStatus::POLLING:
             if (_client && _client->isConnected()) {
-                if (!_state.last_connected_at[0] && _state.setLastConnectedNow()) {
-                    LOGF("[BLE] Last connected at %s\n", _state.last_connected_at);
-                    if (_callback) {
-                        _callback(_state);
+                // NTP may not have synced at handshake time; stamp it once it has.
+                bool stamped = false;
+                if (xSemaphoreTake(_stateMutex, portMAX_DELAY) == pdTRUE) {
+                    stamped = !_state.last_connected_at[0] && _state.setLastConnectedNow();
+                    if (stamped) {
+                        LOGF("[BLE] Last connected at %s\n", _state.last_connected_at);
                     }
+                    xSemaphoreGive(_stateMutex);
+                }
+                if (stamped) {
+                    notifyStateChanged();
                 }
                 if (now - _lastPoll >= _pollInterval) {
                     pollData();
@@ -431,29 +404,6 @@ void BleClient::loop() {
             }
             break;
     }
-}
-
-bool BleClient::loadAddress() {
-    // We no longer persist the MAC address — only a "paired" flag.
-    // Matching is always done by device name, so any address works.
-    Preferences prefs;
-    prefs.begin("ble", true);
-    const bool paired = prefs.getBool("paired", false);
-    prefs.end();
-    LOGLN(paired
-        ? "[BLE] Paired device flag found — auto scan enabled"
-        : "[BLE] No paired flag — auto scan enabled");
-    return paired;
-}
-
-void BleClient::saveAddress() {
-    // Only persist the paired flag, not the MAC address.
-    Preferences prefs;
-    prefs.begin("ble", false);
-    prefs.putBool("paired", true);
-    prefs.end();
-    _hasStoredAddr = true;
-    LOGLN("[BLE] Paired flag saved");
 }
 
 void BleClient::startScan() {
@@ -476,7 +426,6 @@ void BleClient::startScan() {
     scan->stop();
     scan->clearResults();
     _lastScanStartedMs = millis();
-    _lastScanStartOk = false;
     _lastScanStartOk = scan->start(0, false, true);
     if (!_lastScanStartOk) {
         LOGLN("[BLE] Failed to start continuous scan");
@@ -507,17 +456,10 @@ bool BleClient::connectAndSetup() {
 
     LOGLN("[BLE] Starting connect with WiFi left enabled");
 
-    bool connected = false;
-    for (uint8_t attempt = 1; attempt <= CONNECT_MAX_ATTEMPTS; ++attempt) {
-        LOGF("[BLE] Connect attempt %u/%u (timeout=%lums)...\n",
-            attempt,
-            CONNECT_MAX_ATTEMPTS,
-            CONNECT_TIMEOUT_MS);
-        ++_connectAttemptCount;
-        if (_client->connect(_targetAddr)) {
-            connected = true;
-            break;
-        }
+    LOGF("[BLE] Connect attempt (timeout=%lums)...\n", (unsigned long)CONNECT_TIMEOUT_MS);
+    ++_connectAttemptCount;
+    const bool connected = _client->connect(_targetAddr);
+    if (!connected) {
         const int rc = _client->getLastError();
         _lastConnectError = rc;
         ++_connectFailCount;
@@ -527,7 +469,6 @@ bool BleClient::connectAndSetup() {
     restoreWifiAfterBle();
 
     if (!connected) {
-        LOGLN("[BLE] All connect attempts failed");
         return false;
     }
 
@@ -613,6 +554,10 @@ void BleClient::processFrameBuffer() {
     bool changed = false;
     bool sawTrip = false;
 
+    if (xSemaphoreTake(_stateMutex, portMAX_DELAY) != pdTRUE) {
+        return;
+    }
+
     while (_bufferLen >= 6) {
         size_t start = 0;
         while (start < _bufferLen && _buffer[start] != FRAME_START) {
@@ -640,6 +585,9 @@ void BleClient::processFrameBuffer() {
         }
 
         if (_buffer[frameLen - 1] == FRAME_END) {
+            // Inbound frames carry the CRC high byte first, whereas requests we
+            // build (buildRequest) send it low byte first. That asymmetry is
+            // how the bike's protocol behaves; do not "fix" either side.
             const uint16_t expectedCrc = ((uint16_t)_buffer[2 + payloadLen] << 8) |
                                          (uint16_t)_buffer[3 + payloadLen];
             const uint16_t actualCrc = crc16(_buffer, 2 + payloadLen);
@@ -678,9 +626,26 @@ void BleClient::processFrameBuffer() {
         _state.setLastDataNow();
     }
 
-    if ((changed || sawTrip) && _callback) {
-        _callback(_state);
+    xSemaphoreGive(_stateMutex);
+
+    if (changed || sawTrip) {
+        notifyStateChanged();
     }
+}
+
+void BleClient::notifyStateChanged() {
+    if (_callback) {
+        _callback(getStateSnapshot());
+    }
+}
+
+BikeState BleClient::getStateSnapshot() const {
+    BikeState copy;
+    if (_stateMutex && xSemaphoreTake(_stateMutex, portMAX_DELAY) == pdTRUE) {
+        copy = _state;
+        xSemaphoreGive(_stateMutex);
+    }
+    return copy;
 }
 
 bool BleClient::requestStaticFields() {
@@ -781,15 +746,19 @@ void BleClient::runHandshake() {
     _lastNotifyWarning = 0;
     _reconnectDelay = DISCONNECTED_SCAN_RETRY_MS;
 
-    if (_state.setLastConnectedNow()) {
-        LOGF("[BLE] Last connected at %s\n", _state.last_connected_at);
-    } else {
+    bool stamped = false;
+    if (xSemaphoreTake(_stateMutex, portMAX_DELAY) == pdTRUE) {
+        stamped = _state.setLastConnectedNow();
+        if (stamped) {
+            LOGF("[BLE] Last connected at %s\n", _state.last_connected_at);
+        }
+        xSemaphoreGive(_stateMutex);
+    }
+    if (!stamped) {
         LOGLN("[BLE] Last connected timestamp unavailable (waiting for NTP)");
     }
 
-    if (_callback) {
-        _callback(_state);
-    }
+    notifyStateChanged();
 }
 
 void BleClient::pollData() {

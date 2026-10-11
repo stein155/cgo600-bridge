@@ -30,11 +30,12 @@ For this project I reverse engineered the bike's Bluetooth protocol and built ES
 | Total range | km | `cgo600/sensor/range/state` |
 | Serial number | — | `cgo600/sensor/serial_number/state` |
 | Last connected | ISO 8601 UTC | `cgo600/sensor/last_connected/state` |
+| BLE status | searching/connecting/handshake/connected | `cgo600/sensor/ble_status/state` |
 | Light | on/off | `cgo600/light/state` |
 
 The light can also be controlled from Home Assistant by publishing `on` or `off` to `cgo600/light/set`.
 
-All entities are registered in Home Assistant automatically via MQTT discovery. The topic prefix (`cgo600`) is configurable.
+All entities are registered in Home Assistant automatically via MQTT discovery. State topics are retained, so Home Assistant keeps the last known values after a restart even while the bike is away. The topic prefix (`cgo600`) is configurable.
 
 ## Ride history
 
@@ -209,14 +210,18 @@ firmware/
     web_server.h/.cpp   HTTP API and web interface serving
     logger.h/.cpp       Logging helpers
     reset_reason.h      Boot/reset reason decoding
-  data/
-    index.html          Dashboard shell (single-page app)
-    app.js              Dashboard logic and rendering
-    i18n.js             UI translations
-    style.css           Shared styling
+  scripts/
+    build_web.py        Bundles web/ into data/ (runs automatically on every build)
+  web/                  Web UI sources (single-page app, no framework)
+    index.html          Dashboard shell
+    js/                 App modules, bundled into app.js in a fixed order
+      views/            Dashboard, rides, ride detail, settings, tab bar
+    css/                Styles, bundled into style.css in filename order
+    i18n.js             UI translations and theme handling
     config.html         Redirect shim (/config.html → /#settings)
     manifest.json       PWA manifest
     sw.js               Service worker (offline shell cache)
+  data/                 Generated, gzipped LittleFS content (git-ignored)
 ```
 
 ### Partition layout
@@ -229,3 +234,9 @@ firmware/
 | nvs | 20 KB | Configuration storage |
 
 The partition label is `spiffs` for ESP32 compatibility, but PlatformIO builds a LittleFS image for it.
+
+### Web UI development
+
+Edit the sources in `firmware/web/`, never `firmware/data/`: that directory is regenerated from `web/` on every PlatformIO build. Every file is stored gzipped; the web server serves `<name>.gz` for `<name>`. A new JS file must be added to `JS_ORDER` in `firmware/scripts/build_web.py`; CSS files are bundled in filename order. To build the bundle without PlatformIO, run `python3 firmware/scripts/build_web.py`.
+
+> **Note:** `uploadfs` replaces the whole LittleFS partition, which also holds the ride history. Flashing the web UI therefore clears the stored rides.

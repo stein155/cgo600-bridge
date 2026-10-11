@@ -7,6 +7,8 @@ cgo600.conf
 
 # PlatformIO
 firmware/.pio/
+# Generated from firmware/web/ by firmware/scripts/build_web.py
+firmware/data/
 firmware/.vscode/
 
 # ESPHome

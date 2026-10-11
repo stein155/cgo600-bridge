@@ -47,10 +47,12 @@ private:
     bool _hasCachedState = false;
     bool _hasPublishedState = false;
     bool _statePublishPending = false;
+    volatile bool _resyncPending = false;
     unsigned long _lastReconnect = 0;
     unsigned long _connectStartedAt = 0;
     unsigned long _lastStatePublish = 0;
-    ConnectionState _state = ConnectionState::DISCONNECTED;
+    // Updated from AsyncMqttClient callbacks (AsyncTCP task) and loop().
+    volatile ConnectionState _state = ConnectionState::DISCONNECTED;
     MqttLightCommandCallback _lightCommandCallback = nullptr;
     BikeState _cachedState;
     BikeState _publishedState;

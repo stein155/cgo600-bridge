@@ -57,7 +57,7 @@ static bool appendJson(char* buffer, size_t bufferSize, size_t& used, const char
 }
 
 static size_t buildStateJson(char* buffer, size_t bufferSize) {
-    const BikeState& state = bleClient.getState();
+    const BikeState state = bleClient.getStateSnapshot();
     size_t used = 0;
     bool firstField = true;
 
@@ -222,16 +222,6 @@ void WebUI::begin() {
         req->send(200, "application/json", "{\"ok\":true}");
     });
 
-    // TEMP DEBUG: rolling trace of observe() decisions (connection times + odo).
-    _server.on("/api/debug/rides", HTTP_GET, [](AsyncWebServerRequest* req) {
-        req->send(200, "application/json", rideLog.toDebugJson());
-    });
-
-    _server.on("/api/debug/rides", HTTP_DELETE, [](AsyncWebServerRequest* req) {
-        rideLog.clearDebug();
-        req->send(200, "application/json", "{\"ok\":true}");
-    });
-
     // API: save config
     _server.on("/api/config", HTTP_POST, [](AsyncWebServerRequest* req) {},
         NULL,
@@ -244,9 +234,7 @@ void WebUI::begin() {
                 req->send(413, "application/json", "{\"error\":\"fragmented request unsupported\"}");
                 return;
             }
-            String body;
-            body.reserve(total);
-            body = String((char*)data, len);
+            const String body((const char*)data, len);
             Config updated = config;
             if (updated.fromJson(body)) {
                 config = updated;
@@ -257,24 +245,6 @@ void WebUI::begin() {
             }
         }
     );
-
-    _server.on("/api/ble/paired", HTTP_GET, [](AsyncWebServerRequest* req) {
-        JsonDocument doc;
-        doc["paired"] = bleClient.hasStoredAddress();
-        AsyncResponseStream* response = req->beginResponseStream("application/json");
-        serializeJson(doc, *response);
-        req->send(response);
-    });
-
-    _server.on("/api/ble/select", HTTP_POST, [](AsyncWebServerRequest* req) {
-        bleClient.enable();
-        req->send(200, "application/json", "{\"ok\":true}");
-    });
-
-    _server.on("/api/ble/forget", HTTP_POST, [](AsyncWebServerRequest* req) {
-        bleClient.forgetPairedDevice();
-        req->send(200, "application/json", "{\"ok\":true}");
-    });
 
     _server.on("/api/light", HTTP_POST, [](AsyncWebServerRequest* req) {},
         NULL,
