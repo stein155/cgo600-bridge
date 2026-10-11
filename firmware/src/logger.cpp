@@ -22,5 +22,10 @@ void Logger::logf(const char* fmt, ...) {
     va_start(args, fmt);
     vsnprintf(buffer, sizeof(buffer), fmt, args);
     va_end(args);
+    // logln() adds the line ending; drop trailing newlines from the format.
+    size_t len = strlen(buffer);
+    while (len > 0 && (buffer[len - 1] == '\n' || buffer[len - 1] == '\r')) {
+        buffer[--len] = '\0';
+    }
     logln(buffer);
 }

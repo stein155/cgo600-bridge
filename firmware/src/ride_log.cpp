@@ -1,5 +1,6 @@
 #include "ride_log.h"
 #include "logger.h"
+#include "util.h"
 #include <ArduinoJson.h>
 #include <LittleFS.h>
 #include <cmath>
@@ -9,17 +10,25 @@ RideLog rideLog;
 
 static constexpr const char* SNAPSHOT_PATH = "/ride_snapshot.json";
 static constexpr const char* RIDES_PATH = "/rides.json";
-static constexpr const char* DEBUG_PATH = "/ride_debug.json"; // TEMP DEBUG
+static constexpr const char* LEGACY_DEBUG_PATH = "/ride_debug.json";
 static constexpr float MIN_DISTANCE_DELTA_KM = 0.1f;
 static constexpr int MIN_DURATION_DELTA_SEC = 60;
 
 void RideLog::begin() {
+    if (!_mutex) {
+        _mutex = xSemaphoreCreateMutex();
+    }
+    Lock lock(_mutex);
     loadSnapshot();
     loadRides();
-    loadDebug();
+    // Remove the trace file left behind by older debug firmware.
+    if (LittleFS.exists(LEGACY_DEBUG_PATH)) {
+        LittleFS.remove(LEGACY_DEBUG_PATH);
+    }
 }
 
 void RideLog::setMaxRides(size_t maxRides) {
+    Lock lock(_mutex);
     if (maxRides < 10) {
         maxRides = 10;
     } else if (maxRides > MAX_RIDES_CAP) {
@@ -31,137 +40,12 @@ void RideLog::setMaxRides(size_t maxRides) {
 }
 
 void RideLog::clear() {
+    Lock lock(_mutex);
     _snapshot = Snapshot();
     _rideCount = 0;
     LittleFS.remove(SNAPSHOT_PATH);
     LittleFS.remove(RIDES_PATH);
-    LOGLN("[BLE] Ride log cleared");
-}
-
-void RideLog::clearDebug() {
-    _debugCount = 0;
-    _debugHead = 0;
-    LittleFS.remove(DEBUG_PATH);
-    LOGLN("[BLE] Ride debug trace cleared");
-}
-
-void RideLog::traceDebug(const char* action, const BikeState& state, float distanceDelta,
-                         int durationDelta, bool moved, bool countersReset) {
-    DebugTrace& t = _debug[_debugHead];
-    t = DebugTrace();
-    copyText(t.at, sizeof(t.at), state.last_data_at);
-    copyText(t.conn_at, sizeof(t.conn_at), state.last_connected_at);
-    t.distance_km = state.trip_distance_km;
-    t.duration_sec = state.trip_duration;
-    t.battery = state.battery;
-    t.distance_delta = distanceDelta;
-    t.duration_delta = durationDelta;
-    t.moved = moved;
-    t.counters_reset = countersReset;
-    copyText(t.action, sizeof(t.action), action);
-
-    _debugHead = (_debugHead + 1) % DEBUG_CAP;
-    if (_debugCount < DEBUG_CAP) {
-        ++_debugCount;
-    }
-    saveDebug();
-}
-
-String RideLog::toDebugJson() const {
-    JsonDocument doc;
-    doc["snapshot_seen_at"] = _snapshot.seen_at;
-    doc["snapshot_distance_km"] = serialized(String(_snapshot.distance_km, 1));
-    doc["snapshot_duration_sec"] = _snapshot.duration_sec;
-    doc["snapshot_battery"] = _snapshot.battery;
-    JsonArray events = doc["events"].to<JsonArray>();
-
-    // Emit newest-first by walking backwards from the most recent write.
-    for (size_t i = 0; i < _debugCount; ++i) {
-        const size_t idx = (_debugHead + DEBUG_CAP - 1 - i) % DEBUG_CAP;
-        const DebugTrace& t = _debug[idx];
-        JsonObject e = events.add<JsonObject>();
-        e["at"] = t.at;
-        e["conn_at"] = t.conn_at;
-        e["action"] = t.action;
-        e["distance_km"] = serialized(String(t.distance_km, 1));
-        e["duration_sec"] = t.duration_sec;
-        e["battery"] = t.battery;
-        e["distance_delta"] = serialized(String(t.distance_delta, 2));
-        e["duration_delta"] = t.duration_delta;
-        e["moved"] = t.moved;
-        e["counters_reset"] = t.counters_reset;
-    }
-
-    String json;
-    serializeJson(doc, json);
-    return json;
-}
-
-void RideLog::loadDebug() {
-    File file = LittleFS.open(DEBUG_PATH, "r");
-    if (!file) {
-        return;
-    }
-
-    JsonDocument doc;
-    if (deserializeJson(doc, file)) {
-        file.close();
-        return;
-    }
-    file.close();
-
-    _debugCount = 0;
-    _debugHead = 0;
-    JsonArray events = doc["events"].as<JsonArray>();
-    // Stored oldest-first; replay so the ring ends with the newest entry.
-    for (JsonObject e : events) {
-        if (_debugCount >= DEBUG_CAP) {
-            break;
-        }
-        DebugTrace& t = _debug[_debugHead];
-        t = DebugTrace();
-        copyText(t.at, sizeof(t.at), e["at"] | "");
-        copyText(t.conn_at, sizeof(t.conn_at), e["conn_at"] | "");
-        copyText(t.action, sizeof(t.action), e["action"] | "");
-        t.distance_km = e["distance_km"] | -1.0f;
-        t.duration_sec = e["duration_sec"] | -1;
-        t.battery = e["battery"] | -1;
-        t.distance_delta = e["distance_delta"] | 0.0f;
-        t.duration_delta = e["duration_delta"] | 0;
-        t.moved = e["moved"] | false;
-        t.counters_reset = e["counters_reset"] | false;
-        _debugHead = (_debugHead + 1) % DEBUG_CAP;
-        ++_debugCount;
-    }
-}
-
-void RideLog::saveDebug() const {
-    File file = LittleFS.open(DEBUG_PATH, "w");
-    if (!file) {
-        LOGLN("[BLE] Failed to open ride debug for writing");
-        return;
-    }
-
-    JsonDocument doc;
-    JsonArray events = doc["events"].to<JsonArray>();
-    // Persist oldest-first so loadDebug() can replay in order.
-    for (size_t i = 0; i < _debugCount; ++i) {
-        const size_t idx = (_debugHead + DEBUG_CAP - _debugCount + i) % DEBUG_CAP;
-        const DebugTrace& t = _debug[idx];
-        JsonObject e = events.add<JsonObject>();
-        e["at"] = t.at;
-        e["conn_at"] = t.conn_at;
-        e["action"] = t.action;
-        e["distance_km"] = t.distance_km;
-        e["duration_sec"] = t.duration_sec;
-        e["battery"] = t.battery;
-        e["distance_delta"] = t.distance_delta;
-        e["duration_delta"] = t.duration_delta;
-        e["moved"] = t.moved;
-        e["counters_reset"] = t.counters_reset;
-    }
-    serializeJson(doc, file);
-    file.close();
+    LOGLN("[RIDE] Ride log cleared");
 }
 
 void RideLog::observe(const BikeState& state) {
@@ -176,6 +60,8 @@ void RideLog::observe(const BikeState& state) {
         return;
     }
 
+    Lock lock(_mutex);
+
     const float distance = distanceMetric(state);
     const int duration = state.trip_duration;
     const bool hasDistance = distance >= 0.0f;
@@ -183,12 +69,11 @@ void RideLog::observe(const BikeState& state) {
 
     if (!_snapshot.valid) {
         _snapshot.valid = true;
-        copyText(_snapshot.seen_at, sizeof(_snapshot.seen_at), state.last_data_at);
+        copyString(_snapshot.seen_at, sizeof(_snapshot.seen_at), state.last_data_at);
         _snapshot.distance_km = distance;
         _snapshot.duration_sec = duration;
         _snapshot.battery = state.battery;
         saveSnapshot();
-        traceDebug("first", state, 0.0f, 0, false, false);
         return;
     }
 
@@ -206,14 +91,13 @@ void RideLog::observe(const BikeState& state) {
         // The bike reset its trip counters; rebase the baseline to now without
         // logging a ride.
         rebaseSnapshot(state, distance, duration);
-        traceDebug("rebased", state, distanceDelta, durationDelta, moved, countersReset);
         return;
     }
 
     if (moved) {
         RideEntry entry;
-        copyText(entry.window_start, sizeof(entry.window_start), _snapshot.seen_at);
-        copyText(entry.window_end, sizeof(entry.window_end), state.last_data_at);
+        copyString(entry.window_start, sizeof(entry.window_start), _snapshot.seen_at);
+        copyString(entry.window_end, sizeof(entry.window_end), state.last_data_at);
         entry.distance_km = distanceDelta > 0.0f ? distanceDelta : 0.0f;
         entry.ride_duration_sec = durationDelta > 0 ? durationDelta : 0;
         entry.battery_start = _snapshot.battery;
@@ -230,8 +114,7 @@ void RideLog::observe(const BikeState& state) {
         _rides[0] = entry;
         saveRides();
         rebaseSnapshot(state, distance, duration);
-        traceDebug("logged", state, distanceDelta, durationDelta, moved, countersReset);
-        LOGF("[BLE] Ride logged: %.1f km, %d sec\n", entry.distance_km, entry.ride_duration_sec);
+        LOGF("[RIDE] Ride logged: %.1f km, %d sec\n", entry.distance_km, entry.ride_duration_sec);
         return;
     }
 
@@ -241,14 +124,13 @@ void RideLog::observe(const BikeState& state) {
     // is the best proxy for the departure time. The odometer baseline stays
     // put, so the next real movement is measured against the correct value.
     _snapshot.battery = state.battery;
-    copyText(_snapshot.seen_at, sizeof(_snapshot.seen_at), state.last_data_at);
+    copyString(_snapshot.seen_at, sizeof(_snapshot.seen_at), state.last_data_at);
     persistIdle();
-    traceDebug("idle", state, distanceDelta, durationDelta, moved, countersReset);
 }
 
 void RideLog::rebaseSnapshot(const BikeState& state, float distance, int duration) {
     _snapshot.valid = true;
-    copyText(_snapshot.seen_at, sizeof(_snapshot.seen_at), state.last_data_at);
+    copyString(_snapshot.seen_at, sizeof(_snapshot.seen_at), state.last_data_at);
     _snapshot.distance_km = distance;
     _snapshot.duration_sec = duration;
     _snapshot.battery = state.battery;
@@ -267,6 +149,11 @@ void RideLog::persistIdle() {
 }
 
 String RideLog::toJson() const {
+    Lock lock(_mutex);
+    return buildJson();
+}
+
+String RideLog::buildJson() const {
     JsonDocument doc;
     JsonArray rides = doc["rides"].to<JsonArray>();
 
@@ -301,7 +188,7 @@ bool RideLog::loadSnapshot() {
     file.close();
 
     _snapshot.valid = doc["valid"] | false;
-    copyText(_snapshot.seen_at, sizeof(_snapshot.seen_at), doc["seen_at"] | "");
+    copyString(_snapshot.seen_at, sizeof(_snapshot.seen_at), doc["seen_at"] | "");
     _snapshot.distance_km = doc["distance_km"] | -1.0f;
     _snapshot.duration_sec = doc["duration_sec"] | -1;
     _snapshot.battery = doc["battery"] | -1;
@@ -311,7 +198,7 @@ bool RideLog::loadSnapshot() {
 void RideLog::saveSnapshot() const {
     File file = LittleFS.open(SNAPSHOT_PATH, "w");
     if (!file) {
-        LOGLN("[BLE] Failed to open ride snapshot for writing");
+        LOGLN("[RIDE] Failed to open ride snapshot for writing");
         return;
     }
 
@@ -345,8 +232,8 @@ bool RideLog::loadRides() {
             break;
         }
         RideEntry& entry = _rides[_rideCount++];
-        copyText(entry.window_start, sizeof(entry.window_start), ride["window_start"] | "");
-        copyText(entry.window_end, sizeof(entry.window_end), ride["window_end"] | "");
+        copyString(entry.window_start, sizeof(entry.window_start), ride["window_start"] | "");
+        copyString(entry.window_end, sizeof(entry.window_end), ride["window_end"] | "");
         entry.distance_km = ride["distance_km"] | 0.0f;
         entry.ride_duration_sec = ride["ride_duration_sec"] | 0;
         entry.battery_start = ride["battery_start"] | -1;
@@ -360,11 +247,11 @@ bool RideLog::loadRides() {
 void RideLog::saveRides() const {
     File file = LittleFS.open(RIDES_PATH, "w");
     if (!file) {
-        LOGLN("[BLE] Failed to open ride log for writing");
+        LOGLN("[RIDE] Failed to open ride log for writing");
         return;
     }
 
-    file.print(toJson());
+    file.print(buildJson());
     file.close();
 }
 
@@ -383,15 +270,4 @@ bool RideLog::hasUsableMetrics(const BikeState& state) {
 
 float RideLog::distanceMetric(const BikeState& state) {
     return state.trip_distance_km;
-}
-
-void RideLog::copyText(char* dest, size_t destSize, const char* src) {
-    if (!dest || destSize == 0) {
-        return;
-    }
-    if (!src) {
-        src = "";
-    }
-    strncpy(dest, src, destSize - 1);
-    dest[destSize - 1] = '\0';
 }

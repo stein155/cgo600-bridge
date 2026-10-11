@@ -1,7 +1,8 @@
 #pragma once
 #include <Arduino.h>
 #include <NimBLEDevice.h>
-#include <Preferences.h>
+#include <freertos/FreeRTOS.h>
+#include <freertos/semphr.h>
 #include "bike_state.h"
 
 enum class BleStatus : uint8_t {
@@ -23,11 +24,10 @@ public:
     void setPollInterval(float seconds) { _pollInterval = (unsigned long)(seconds * 1000); }
     void setWifiReady(bool ready);  // call once WiFi is connected
 
-    BleStatus getStatus() const { return _status; }
-    const BikeState& getState() const { return _state; }
+    // Thread-safe copy; _state is written from the NimBLE task.
+    BikeState getStateSnapshot() const;
     const char* getStatusStr() const;
     bool deviceFound() const { return _deviceFound; }
-    bool hasStoredAddress() const { return _hasStoredAddr; }
     unsigned long getReconnectDelayMs() const { return _reconnectDelay; }
     unsigned long getLastReconnectMs() const { return _lastReconnect; }
     unsigned long getLastNotifyMs() const { return _lastNotify; }
@@ -43,8 +43,6 @@ public:
     uint32_t getSeenNonConnectableCount() const { return _seenNonConnectableCount; }
     uint32_t getConnectAttemptCount() const { return _connectAttemptCount; }
     uint32_t getConnectFailCount() const { return _connectFailCount; }
-    bool enable();
-    void forgetPairedDevice();
     bool setLight(bool on);
 
     // Called from scan callback
@@ -59,8 +57,6 @@ private:
     void onDisconnect(NimBLEClient* client, int reason) override;
     void startScan();
     bool connectAndSetup();
-    void saveAddress();
-    bool loadAddress();
     bool requestStaticFields();
     void runHandshake();
     void pollData();
@@ -68,6 +64,7 @@ private:
     void resetFrameBuffer();
     void appendNotifyData(const uint8_t* data, size_t len);
     void processFrameBuffer();
+    void notifyStateChanged();
 
     static void notifyCallback(NimBLERemoteCharacteristic* chr, uint8_t* data, size_t len, bool isNotify);
 
@@ -77,10 +74,12 @@ private:
     NimBLERemoteCharacteristic* _rxChar = nullptr;
 
     BikeState _state;
+    SemaphoreHandle_t _stateMutex = nullptr;
     static constexpr size_t FRAME_BUFFER_SIZE = 512;
     uint8_t _buffer[FRAME_BUFFER_SIZE] = {0};
     size_t _bufferLen = 0;
-    BleStatus _status = BleStatus::IDLE;
+    // Written from both the NimBLE task (callbacks) and the main loop.
+    volatile BleStatus _status = BleStatus::IDLE;
     StateChangeCallback _callback = nullptr;
 
     NimBLEAddress _targetAddr{};
@@ -95,7 +94,6 @@ private:
     unsigned long _reconnectDelay = 2000;
     unsigned long _lastScanStartedMs = 0;
     unsigned long _lastScanEndedMs = 0;
-    bool _hasStoredAddr = false;
     bool _lastScanStartOk = false;
     int _lastScanEndReason = 0;
     int _lastConnectError = 0;

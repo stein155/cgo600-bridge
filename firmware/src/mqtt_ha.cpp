@@ -2,6 +2,7 @@
 #include "ble_client.h"
 #include <ArduinoJson.h>
 #include "logger.h"
+#include "util.h"
 #include <WiFi.h>
 #include <math.h>
 #include <cstring>
@@ -12,9 +13,9 @@ static constexpr unsigned long MQTT_STATE_PUBLISH_INTERVAL_MS = 1000;
 static constexpr const char* HA_PREFIX = "homeassistant";
 static constexpr const char* HA_DEVICE_ID = "cgo600";
 
-static void clearRetainedTopic(AsyncMqttClient& client, const char* topic) {
-    client.publish(topic, 1, true, "");
-}
+// Guards _cachedState/_hasCachedState/_statePublishPending, which publishState()
+// writes from the NimBLE task while loop() reads them on the main task.
+static portMUX_TYPE s_cacheMux = portMUX_INITIALIZER_UNLOCKED;
 
 static bool sameFloat(float a, float b) {
     if (a < 0 && b < 0) {
@@ -27,16 +28,14 @@ static bool sameText(const char* a, const char* b) {
     return strncmp(a, b, 32) == 0;
 }
 
-static void copyString(char* dest, size_t destSize, const char* src) {
-    if (!dest || destSize == 0) {
-        return;
-    }
-    if (!src) {
-        dest[0] = '\0';
-        return;
-    }
-    strncpy(dest, src, destSize - 1);
-    dest[destSize - 1] = '\0';
+static void addDeviceInfo(JsonDocument& doc, const char* serial) {
+    JsonObject device = doc["device"].to<JsonObject>();
+    JsonArray ids = device["identifiers"].to<JsonArray>();
+    ids.add(HA_DEVICE_ID);
+    device["name"] = "Tenways CGO600";
+    device["manufacturer"] = "Tenways";
+    device["model"] = "CGO600";
+    if (serial) device["serial_number"] = serial;
 }
 
 MqttHA mqttHA;
@@ -116,10 +115,38 @@ void MqttHA::loop() {
         return;
     }
 
-    if (_state == ConnectionState::CONNECTED && _statePublishPending && now - _lastStatePublish >= MQTT_STATE_PUBLISH_INTERVAL_MS) {
-        publishStateTopics(_cachedState);
-        _lastStatePublish = now;
+    if (_state != ConnectionState::CONNECTED) {
+        return;
+    }
+
+    // onConnect() runs on the AsyncTCP task and only raises this flag; the
+    // full discovery + state republish happens here on the main task.
+    if (_resyncPending) {
+        _resyncPending = false;
+        _discoveryDone = false;
+        _hasPublishedState = false;
+        _lastBleStatus[0] = '\0';
+        char serial[sizeof(_cachedState.serial_number)] = {0};
+        portENTER_CRITICAL(&s_cacheMux);
+        if (_hasCachedState) {
+            memcpy(serial, _cachedState.serial_number, sizeof(serial));
+            _statePublishPending = true;
+        }
+        portEXIT_CRITICAL(&s_cacheMux);
+        // Publish discovery right away so bridge-level entities (ble_status)
+        // exist even before the bike has been seen since boot.
+        publishDiscovery(serial[0] ? serial : nullptr);
+        _lastStatePublish = now - MQTT_STATE_PUBLISH_INTERVAL_MS;
+    }
+
+    if (_statePublishPending && now - _lastStatePublish >= MQTT_STATE_PUBLISH_INTERVAL_MS) {
+        BikeState snapshot;
+        portENTER_CRITICAL(&s_cacheMux);
+        snapshot = _cachedState;
         _statePublishPending = false;
+        portEXIT_CRITICAL(&s_cacheMux);
+        publishStateTopics(snapshot);
+        _lastStatePublish = now;
     }
 }
 
@@ -131,20 +158,12 @@ void MqttHA::onConnect(bool sessionPresent) {
     (void)sessionPresent;
     _state = ConnectionState::CONNECTED;
     _connectStartedAt = 0;
-    _hasPublishedState = false;
     LOGF("[MQTT] Connected to %s\n", _broker);
     char topic[64];
     snprintf(topic, sizeof(topic), "%s/status", _prefix);
     _client.publish(topic, 1, true, "online");
     _client.subscribe(_lightCommandTopic, 1);
-
-    if (_hasCachedState) {
-        _discoveryDone = false;
-        publishDiscovery(_cachedState.getDisplaySerial());
-        publishStateTopics(_cachedState);
-        _lastStatePublish = millis();
-        _statePublishPending = false;
-    }
+    _resyncPending = true;
 }
 
 void MqttHA::onMessage(char* topic, char* payload, size_t len, size_t index, size_t total) {
@@ -216,20 +235,7 @@ void MqttHA::publishDiscovery(const char* serial) {
         if (strncmp(_discoverySerial, serial, sizeof(_discoverySerial)) == 0) return;
     }
 
-    static const char* sensorSuffixes[] = {
-        "battery",
-        "speed",
-        "max_speed",
-        "avg_speed",
-        "trip_distance",
-        "trip_duration",
-        "remaining_range",
-        "range",
-        "serial_number",
-        "last_connected",
-    };
-
-    // Sensor definitions — identical to Python mqtt.py _SENSORS
+    // Sensor definitions — mirror Python mqtt.py _SENSORS, plus bridge ble_status
     struct SensorDef {
         const char* suffix;
         const char* component;
@@ -248,6 +254,7 @@ void MqttHA::publishDiscovery(const char* serial) {
         {"range",     "sensor",        "distance", "km",   "mdi:map-marker-distance"},
         {"serial_number", "sensor",   nullptr,    nullptr,  "mdi:identifier"},
         {"last_connected", "sensor",   "timestamp", nullptr, "mdi:clock-check-outline"},
+        {"ble_status", "sensor",       nullptr,    nullptr,  "mdi:bluetooth"},
     };
 
     auto formatSensorName = [](const char* suffix, char* out, size_t outSize) {
@@ -268,27 +275,6 @@ void MqttHA::publishDiscovery(const char* serial) {
         }
         out[j] = '\0';
     };
-
-    char legacyTopic[160];
-    if (hasSerial) {
-        for (const char* suffix : sensorSuffixes) {
-            snprintf(legacyTopic, sizeof(legacyTopic), "%s/sensor/%s_%s_%s/config", HA_PREFIX, HA_DEVICE_ID, serial, suffix);
-            clearRetainedTopic(_client, legacyTopic);
-        }
-        snprintf(legacyTopic, sizeof(legacyTopic), "%s/light/%s_%s_light/config", HA_PREFIX, HA_DEVICE_ID, serial);
-        clearRetainedTopic(_client, legacyTopic);
-        snprintf(legacyTopic, sizeof(legacyTopic), "%s/binary_sensor/%s_%s_light/config", HA_PREFIX, HA_DEVICE_ID, serial);
-        clearRetainedTopic(_client, legacyTopic);
-        LOGF("[MQTT] Cleared legacy HA discovery topics for serial %s\n", serial);
-    }
-    snprintf(legacyTopic, sizeof(legacyTopic), "%s/sensor/%s_meter_fw_ver/config", HA_PREFIX, HA_DEVICE_ID);
-    clearRetainedTopic(_client, legacyTopic);
-    if (hasSerial) {
-        snprintf(legacyTopic, sizeof(legacyTopic), "%s/sensor/%s_%s_meter_fw_ver/config", HA_PREFIX, HA_DEVICE_ID, serial);
-        clearRetainedTopic(_client, legacyTopic);
-    }
-    snprintf(legacyTopic, sizeof(legacyTopic), "%s/sensor/meter_fw_ver/state", _prefix);
-    clearRetainedTopic(_client, legacyTopic);
 
     for (auto& s : sensors) {
         char uniqueId[64];
@@ -311,22 +297,11 @@ void MqttHA::publishDiscovery(const char* serial) {
         doc["unique_id"] = uniqueId;
         doc["availability_topic"] = availTopic;
 
-        JsonObject device = doc["device"].to<JsonObject>();
-        JsonArray ids = device["identifiers"].to<JsonArray>();
-        ids.add(HA_DEVICE_ID);
-        device["name"] = "Tenways CGO600";
-        device["manufacturer"] = "Tenways";
-        device["model"] = "CGO600";
-        if (hasSerial) device["serial_number"] = serial;
+        addDeviceInfo(doc, hasSerial ? serial : nullptr);
 
         if (s.devClass) doc["device_class"] = s.devClass;
         if (s.unit) doc["unit_of_measurement"] = s.unit;
         if (s.icon) doc["icon"] = s.icon;
-
-        if (strcmp(s.component, "binary_sensor") == 0) {
-            doc["payload_on"] = "on";
-            doc["payload_off"] = "off";
-        }
 
         String payload;
         serializeJson(doc, payload);
@@ -350,23 +325,11 @@ void MqttHA::publishDiscovery(const char* serial) {
         doc["payload_off"] = "off";
         doc["icon"] = "mdi:lightbulb";
 
-        JsonObject device = doc["device"].to<JsonObject>();
-        JsonArray ids = device["identifiers"].to<JsonArray>();
-        ids.add(HA_DEVICE_ID);
-        device["name"] = "Tenways CGO600";
-        device["manufacturer"] = "Tenways";
-        device["model"] = "CGO600";
-        if (hasSerial) device["serial_number"] = serial;
+        addDeviceInfo(doc, hasSerial ? serial : nullptr);
 
         String payload;
         serializeJson(doc, payload);
         _client.publish(configTopic, 1, true, payload.c_str());
-    }
-
-    {
-        char oldConfigTopic[128];
-        snprintf(oldConfigTopic, sizeof(oldConfigTopic), "%s/binary_sensor/%s_light/config", HA_PREFIX, HA_DEVICE_ID);
-        _client.publish(oldConfigTopic, 1, true, "");
     }
 
     if (hasSerial) {
@@ -394,47 +357,47 @@ void MqttHA::publishStateTopics(const BikeState& state) {
     if (state.battery >= 0 && (!prev || prev->battery != state.battery)) {
         snprintf(topic, sizeof(topic), "%s/sensor/battery/state", _prefix);
         snprintf(value, sizeof(value), "%d", state.battery);
-        _client.publish(topic, 0, false, value);
+        _client.publish(topic, 0, true, value);
     }
     if (state.speed_kmh >= 0 && (!prev || !sameFloat(prev->speed_kmh, state.speed_kmh))) {
         snprintf(topic, sizeof(topic), "%s/sensor/speed/state", _prefix);
         snprintf(value, sizeof(value), "%.1f", state.speed_kmh);
-        _client.publish(topic, 0, false, value);
+        _client.publish(topic, 0, true, value);
     }
     if (state.max_speed_kmh >= 0 && (!prev || !sameFloat(prev->max_speed_kmh, state.max_speed_kmh))) {
         snprintf(topic, sizeof(topic), "%s/sensor/max_speed/state", _prefix);
         snprintf(value, sizeof(value), "%.1f", state.max_speed_kmh);
-        _client.publish(topic, 0, false, value);
+        _client.publish(topic, 0, true, value);
     }
     if (state.avg_speed_kmh >= 0 && (!prev || !sameFloat(prev->avg_speed_kmh, state.avg_speed_kmh))) {
         snprintf(topic, sizeof(topic), "%s/sensor/avg_speed/state", _prefix);
         snprintf(value, sizeof(value), "%.1f", state.avg_speed_kmh);
-        _client.publish(topic, 0, false, value);
+        _client.publish(topic, 0, true, value);
     }
     if (state.trip_distance_km >= 0 && (!prev || !sameFloat(prev->trip_distance_km, state.trip_distance_km))) {
         snprintf(topic, sizeof(topic), "%s/sensor/trip_distance/state", _prefix);
         snprintf(value, sizeof(value), "%.1f", state.trip_distance_km);
-        _client.publish(topic, 0, false, value);
+        _client.publish(topic, 0, true, value);
     }
     if (state.trip_duration >= 0 && (!prev || prev->trip_duration != state.trip_duration)) {
         snprintf(topic, sizeof(topic), "%s/sensor/trip_duration/state", _prefix);
         snprintf(value, sizeof(value), "%d", state.trip_duration);
-        _client.publish(topic, 0, false, value);
+        _client.publish(topic, 0, true, value);
     }
     if (state.remaining_range_km >= 0 && (!prev || !sameFloat(prev->remaining_range_km, state.remaining_range_km))) {
         snprintf(topic, sizeof(topic), "%s/sensor/remaining_range/state", _prefix);
         snprintf(value, sizeof(value), "%.1f", state.remaining_range_km);
-        _client.publish(topic, 0, false, value);
+        _client.publish(topic, 0, true, value);
     }
     if (state.total_range_km >= 0 && (!prev || !sameFloat(prev->total_range_km, state.total_range_km))) {
         snprintf(topic, sizeof(topic), "%s/sensor/range/state", _prefix);
         snprintf(value, sizeof(value), "%.1f", state.total_range_km);
-        _client.publish(topic, 0, false, value);
+        _client.publish(topic, 0, true, value);
     }
     if (state.light_valid && (!prev || !prev->light_valid || prev->light_on != state.light_on)) {
         strncpy(topic, _lightStateTopic, sizeof(topic) - 1);
         topic[sizeof(topic) - 1] = '\0';
-        _client.publish(topic, 0, false, state.light_on ? "on" : "off");
+        _client.publish(topic, 0, true, state.light_on ? "on" : "off");
     }
     if (displaySerial && (!prev || !sameText(prev->serial_number, state.serial_number))) {
         snprintf(topic, sizeof(topic), "%s/sensor/serial_number/state", _prefix);
@@ -455,7 +418,7 @@ void MqttHA::publishBleStatus(const char* status) {
     copyString(_lastBleStatus, sizeof(_lastBleStatus), status);
     char topic[64];
     snprintf(topic, sizeof(topic), "%s/sensor/ble_status/state", _prefix);
-    _client.publish(topic, 0, false, status);
+    _client.publish(topic, 0, true, status);
 }
 
 void MqttHA::publishState(const BikeState& state) {
@@ -463,7 +426,9 @@ void MqttHA::publishState(const BikeState& state) {
     // This function may be called from the NimBLE task (Core 0), while
     // AsyncMqttClient is not safe to call from that context.
     // The actual publish happens from loop() on the main task.
+    portENTER_CRITICAL(&s_cacheMux);
     _cachedState = state;
     _hasCachedState = true;
     _statePublishPending = true;
+    portEXIT_CRITICAL(&s_cacheMux);
 }

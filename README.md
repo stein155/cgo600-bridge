@@ -30,11 +30,12 @@ For this project I reverse engineered the bike's Bluetooth protocol and built ES
 | Total range | km | `cgo600/sensor/range/state` |
 | Serial number | — | `cgo600/sensor/serial_number/state` |
 | Last connected | ISO 8601 UTC | `cgo600/sensor/last_connected/state` |
+| BLE status | searching/connecting/handshake/connected | `cgo600/sensor/ble_status/state` |
 | Light | on/off | `cgo600/light/state` |
 
 The light can also be controlled from Home Assistant by publishing `on` or `off` to `cgo600/light/set`.
 
-All entities are registered in Home Assistant automatically via MQTT discovery. The topic prefix (`cgo600`) is configurable.
+All entities are registered in Home Assistant automatically via MQTT discovery. State topics are retained, so Home Assistant keeps the last known values after a restart even while the bike is away. The topic prefix (`cgo600`) is configurable.
 
 ## Ride history
 
