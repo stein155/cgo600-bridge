@@ -16,7 +16,8 @@ No additional agent/editor rule files currently exist in this repo:
 - `firmware/src/protocol.h`: frame parsing and CRC helpers
 - `firmware/src/mqtt_ha.cpp`: MQTT + Home Assistant discovery
 - `firmware/src/web_server.cpp`: web API and WebSocket updates
-- `firmware/data/`: static web UI files for LittleFS
+- `firmware/web/`: web UI sources (`js/`, `css/`, static files)
+- `firmware/scripts/build_web.py`: bundles and gzips `web/` into `firmware/data/` (PlatformIO pre-script)
 - `firmware/platformio.ini`: PlatformIO config
 - `.github/workflows/firmware.yml`: firmware CI
 
@@ -79,7 +80,8 @@ Current firmware validation is manual:
 
 ## Files To Treat Carefully
 - `firmware/.pio/`: build output, ignored by Git
-- `firmware/data/`: changes usually require `uploadfs` for on-device verification
+- `firmware/data/`: generated and git-ignored; edit `firmware/web/` instead
+- `firmware/web/`: changes require `uploadfs` for on-device verification, which also wipes the ride history stored on LittleFS
 - `firmware/platformio.ini`: changes affect CI and local firmware builds
 
 ## Workflow Notes
