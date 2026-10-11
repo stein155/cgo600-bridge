@@ -24,7 +24,6 @@ function render() {
 function refreshConfig() {
     return api('/api/config').then(c => {
         State.config = c;
-        SettingsView.edits = null;
         render();
     }).catch(() => {});
 }
@@ -39,21 +38,6 @@ function fetchStateOnce() {
     return api('/api/state').then(s => { State.bike = s; render(); }).catch(() => {});
 }
 
-// WebSocket for live state.
-let ws = null, wsRetry = WS_RETRY_MIN_MS;
-function connectWS() {
-    if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) return;
-    const proto = location.protocol === 'https:' ? 'wss:' : 'ws:';
-    try { ws = new WebSocket(proto + '//' + location.host + '/ws'); } catch (e) { return; }
-    ws.onopen = () => { wsRetry = WS_RETRY_MIN_MS; };
-    ws.onmessage = ev => {
-        try { State.bike = Object.assign({}, State.bike, JSON.parse(ev.data)); render(); }
-        catch (e) {}
-    };
-    ws.onerror = () => { if (ws) ws.close(); };
-    ws.onclose = () => { ws = null; setTimeout(connectWS, wsRetry); wsRetry = Math.min(wsRetry * 2, WS_RETRY_MAX_MS); };
-}
-
 // Re-render on language/theme changes.
 window.addEventListener('languagechange', render);
 window.addEventListener('themechange',   render);
@@ -62,10 +46,10 @@ window.addEventListener('themechange',   render);
 refreshConfig().then(() => {
     refreshRides();
     fetchStateOnce();
-    connectWS();
     render();
 });
-setInterval(() => { if (!ws || ws.readyState !== WebSocket.OPEN) fetchStateOnce(); }, STATE_POLL_MS);
+// Live state by polling; skip while the page is hidden to spare the bridge.
+setInterval(() => { if (!document.hidden) fetchStateOnce(); }, STATE_POLL_MS);
 setInterval(refreshRides, RIDES_REFRESH_MS);
 
 if ('serviceWorker' in navigator) {

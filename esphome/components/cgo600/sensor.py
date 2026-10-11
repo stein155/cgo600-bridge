@@ -38,7 +38,7 @@ def _distance(icon):
     )
 
 
-# Keys match the MQTT suffixes of the standalone firmware.
+# Keys match the telemetry names used by the dashboard and earlier releases.
 SENSORS = {
     "battery": sensor.sensor_schema(
         unit_of_measurement=UNIT_PERCENT,

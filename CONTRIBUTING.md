@@ -5,55 +5,59 @@ independent hobby project — contributions are welcome.
 
 ## Project layout
 
-- `firmware/src/` — ESP32 firmware (C++/Arduino)
-- `firmware/web/` — web UI sources; bundled and gzipped into the generated
-  `firmware/data/` by `firmware/scripts/build_web.py` on every build
-- `firmware/platformio.ini` — build configuration
-- `AGENTS.md` — detailed conventions for the firmware and important paths
+- `esphome/components/cgo600/` — the ESPHome external component (C++ and Python)
+- `esphome/components/cgo600/web/` — dashboard sources, bundled and embedded
+  into the firmware on every compile
+- `esphome/cgo600-install.yaml` — the configuration the web installer flashes
+- `installer/` — the web installer page and the scripts that publish it
+- `AGENTS.md` — detailed conventions and important paths
 
 ## Building & flashing
 
-Install [PlatformIO](https://platformio.org/) (`pip install platformio`), then
-from the repo root:
+Install [ESPHome](https://esphome.io/guides/installing_esphome) (the CI uses
+the version pinned in `.github/workflows/esphome.yml`), then:
 
 ```bash
-pio run -d firmware                 # build firmware
-pio run -d firmware -t buildfs      # build the LittleFS web-UI image
-pio run -d firmware -t upload       # flash firmware over USB
-pio run -d firmware -t uploadfs     # flash web UI (needed after web/ changes; clears ride history)
-pio device monitor -b 115200        # serial logs
+cp esphome/secrets.yaml.example esphome/secrets.yaml   # fill in WiFi and keys
+esphome compile esphome/cgo600.yaml
+esphome run esphome/cgo600.yaml                         # flash over USB or WiFi
+esphome logs esphome/cgo600.yaml                        # live logs over WiFi
 ```
 
-Over-the-air flashing works after the first USB flash:
-`pio run -d firmware -t upload --upload-port cgo600.local`.
+To build the configuration the web installer ships, with the local component:
+
+```bash
+python3 installer/local_esphome_config.py
+esphome compile esphome/.install-ci.yaml
+```
 
 ## Code style
 
-- C++ follows the conventions in `AGENTS.md` and the repo `.clang-format`
-  (4-space indent, same-line braces, pointers bound to the type). Existing files
-  are not bulk-reformatted; please keep diffs focused and match the surrounding code.
-- Keep telemetry field names and MQTT topic suffixes stable — they are part of the
-  Home Assistant contract (see `AGENTS.md` → Naming).
-- Keep serial log prefixes consistent: `[BLE]`, `[MQTT]`, `[WEB]`, `[BOOT]`, `[OTA]`, `[CFG]`.
+- C++ follows ESPHome conventions (`snake_case` methods, trailing-underscore
+  protected members, `this->`) with 4-space indentation; see `.clang-format`.
+- Keep entity keys stable: `battery`, `speed`, `max_speed`, `avg_speed`,
+  `trip_distance`, `trip_duration`, `remaining_range`, `range`,
+  `serial_number`, `ble_status`, `light`. They are part of the Home Assistant contract.
+- Log with ESPHome's `ESP_LOG*` macros and the component's tags (`cgo600`,
+  `cgo600.rides`, `cgo600.web`).
 
 ## Testing
 
-There is no automated firmware test suite. Validation is manual:
+There is no automated test suite. Validation is manual:
 
-1. `pio run -d firmware` must succeed.
-2. `pio run -d firmware -t buildfs` if web assets in `firmware/web/` changed.
-3. Flash to hardware and verify serial logs, BLE connection, MQTT, and the web UI.
+1. `esphome compile` must succeed for `esphome/cgo600.yaml` and the install configuration.
+2. Flash to hardware and verify the logs, the BLE connection, the Home Assistant
+   entities and the dashboard.
 
-CI builds the firmware and the filesystem image, and runs a (non-blocking)
-`clang-format` check.
+CI compiles both configurations.
 
 ## Pull requests
 
 - Keep changes scoped and explain the *why* in the description.
 - Note any manual verification you performed (build output, on-device behavior).
-- For protocol/MQTT changes, confirm field IDs, MQTT suffixes, and discovery payloads stay stable.
+- For protocol changes, confirm field IDs and entity keys stay stable.
 
 ## Reporting issues
 
-Please use the bug report template and include firmware version, board, and serial
+Please use the bug report template and include the firmware version, board and
 logs. See `SUPPORT.md` for troubleshooting first.

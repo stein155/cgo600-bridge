@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 permissions:
-  contents: read
+  contents: write
   pages: write
   id-token: write
 
@@ -25,8 +25,8 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Install build tools
-        run: pip install platformio esphome==2026.6.5
+      - name: Install ESPHome
+        run: pip install esphome==2026.6.5
 
       - name: Determine version
         id: version
@@ -37,18 +37,24 @@ jobs:
             echo "version=dev-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
           fi
 
-      - name: Build standalone firmware
-        run: |
-          pio run -d firmware
-          pio run -d firmware -t buildfs
-
-      - name: Build ESPHome firmware
+      - name: Build firmware
         run: |
           python3 installer/local_esphome_config.py
           esphome -s project_version "${{ steps.version.outputs.version }}" compile esphome/.install-ci.yaml
 
       - name: Assemble installer site
         run: python3 installer/build_site.py --version "${{ steps.version.outputs.version }}" --out site
+
+      - name: Attach firmware to the release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BUILD=esphome/.esphome/build/cgo600-bridge/.pioenvs/cgo600-bridge
+          cp "$BUILD/firmware.factory.bin" cgo600-bridge-factory.bin
+          cp "$BUILD/firmware.ota.bin" cgo600-bridge-ota.bin
+          sha256sum cgo600-bridge-*.bin > SHA256SUMS
+          gh release upload "${{ github.event.release.tag_name }}" cgo600-bridge-*.bin SHA256SUMS --clobber
 
       - uses: actions/upload-pages-artifact@v3
         with:

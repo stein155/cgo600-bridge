@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a firmware, flashing, BLE, MQTT, or web UI issue
+description: Report a firmware, installation, BLE, Home Assistant, or dashboard issue
 title: "[Bug]: "
 labels: [bug]
 body:
@@ -23,11 +23,11 @@ body:
     attributes:
       label: Area
       options:
-        - Flashing / first setup
+        - Installation / first setup
         - BLE connection
-        - MQTT / Home Assistant
-        - Web dashboard / config
-        - OTA update
+        - Home Assistant
+        - Web dashboard / ride history
+        - Update
         - Other
     validations:
       required: true
@@ -48,11 +48,11 @@ body:
   - type: textarea
     id: logs
     attributes:
-      label: Serial logs
-      description: Paste logs from 115200 baud if available.
+      label: Logs
+      description: Paste logs from esphome logs, the ESPHome dashboard, or USB serial (115200 baud).
       render: text
   - type: textarea
     id: environment
     attributes:
       label: Environment
-      description: MQTT broker, Home Assistant version, WiFi notes, flashing method.
+      description: ESPHome and Home Assistant versions, WiFi notes, how it was installed.

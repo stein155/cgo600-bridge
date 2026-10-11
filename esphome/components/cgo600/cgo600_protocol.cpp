@@ -4,7 +4,7 @@
 
 namespace esphome::cgo600::protocol {
 
-// Pre-built commands, byte-identical to firmware/src/protocol.cpp
+// Pre-built commands, captured from the Tenways app
 static const uint8_t READ_INIT_BYTES[] = {0x52, 0x02, 0x07, 0x03, 0xF3, 0x6D, 0x45};
 static const uint8_t READ_DATA_BYTES[] = {0x57, 0x0D, 0xFE, 0x0B, 0x07, 0x12, 0x13, 0x14, 0x11,
                                           0x16, 0x17, 0x1A, 0x28, 0x21, 0x15, 0xA2, 0x77, 0x45};
@@ -135,7 +135,7 @@ void FrameParser::append_(const uint8_t *data, size_t len) {
     this->len_ += len;
 }
 
-bool FrameParser::feed(BikeState &state, const uint8_t *data, size_t len, uint32_t &bad_crc) {
+bool FrameParser::feed(BikeState &state, const uint8_t *data, size_t len, bool &saw_trip, uint32_t &bad_crc) {
     bool changed = false;
     if (data != nullptr && len > 0) {
         this->append_(data, len);
@@ -176,6 +176,9 @@ bool FrameParser::feed(BikeState &state, const uint8_t *data, size_t len, uint32
                     const uint8_t field_len = this->buffer_[pos++];
                     if (pos + field_len > payload_end) {
                         break;
+                    }
+                    if (field_id == FIELD_TRIP_DISTANCE || field_id == FIELD_TRIP_DURATION) {
+                        saw_trip = true;
                     }
                     if (decode_field(state, field_id, this->buffer_ + pos, field_len)) {
                         changed = true;

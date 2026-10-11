@@ -1,7 +1,8 @@
 # AGENTS.md
 ## Scope
-This repo contains a single CGO600 BLE bridge implementation:
-- ESP32 firmware in `firmware/`
+This repo contains the CGO600 BLE bridge as an ESPHome external component:
+- ESPHome component in `esphome/components/cgo600/`
+- Web installer in `installer/`
 
 ## Rule Files
 No additional agent/editor rule files currently exist in this repo:
@@ -10,84 +11,66 @@ No additional agent/editor rule files currently exist in this repo:
 - `.github/copilot-instructions.md`
 
 ## Important Paths
-- `firmware/src/main.cpp`: WiFi, OTA, and main orchestration
-- `firmware/src/ble_client.h`: BLE scan/connect/session logic
-- `firmware/src/bike_state.h`: telemetry model
-- `firmware/src/protocol.h`: frame parsing and CRC helpers
-- `firmware/src/mqtt_ha.cpp`: MQTT + Home Assistant discovery
-- `firmware/src/web_server.cpp`: web API and WebSocket updates
-- `firmware/web/`: web UI sources (`js/`, `css/`, static files)
-- `firmware/scripts/build_web.py`: bundles and gzips `web/` into `firmware/data/` (PlatformIO pre-script)
-- `firmware/platformio.ini`: PlatformIO config
-- `.github/workflows/firmware.yml`: firmware CI
+- `esphome/components/cgo600/__init__.py`: config schema, codegen, embedding of the dashboard
+- `esphome/components/cgo600/cgo600.h/.cpp`: BLE client (discovery, handshake, polling, entities)
+- `esphome/components/cgo600/cgo600_protocol.h/.cpp`: frames, CRC-16/MODBUS, field decoding
+- `esphome/components/cgo600/ride_log.h/.cpp`: ride inference and NVS storage
+- `esphome/components/cgo600/web_ui.h/.cpp`: dashboard and JSON API on ESPHome's web server
+- `esphome/components/cgo600/web/`: dashboard sources (`js/`, `css/`, static files)
+- `esphome/components/cgo600/web_assets.py`: bundles and gzips `web/` at compile time
+- `esphome/cgo600-install.yaml`: configuration flashed by the web installer
+- `esphome/cgo600.yaml`: development configuration (uses `esphome/secrets.yaml`)
+- `installer/`: web installer page and site assembly
+- `.github/workflows/esphome.yml`: compile CI; `.github/workflows/installer.yml`: Pages + release assets
 
-## Firmware Environment
-Install PlatformIO if needed.
+## Environment
+Install ESPHome (`pip install esphome==2026.6.5`, the version pinned in CI).
+Copy `esphome/secrets.yaml.example` to `esphome/secrets.yaml` before compiling `esphome/cgo600.yaml`.
 
-PlatformIO environment: `esp32`
-Serial monitor speed: `115200`
-
-## Firmware Commands
+## Commands
 Preferred commands from repo root:
 
 ```bash
-pio run -d firmware
-pio run -d firmware -t buildfs
-pio run -d firmware -t upload
-pio run -d firmware -t uploadfs
-pio run -d firmware -t upload --upload-port /dev/cu.usbserial-XXXXX
-pio run -d firmware -t upload --upload-port cgo600.local
-pio device monitor -b 115200
+esphome compile esphome/cgo600.yaml
+esphome upload esphome/cgo600.yaml --device <bridge-ip>
+esphome logs esphome/cgo600.yaml --device <bridge-ip>
+python3 installer/local_esphome_config.py && esphome compile esphome/.install-ci.yaml
+python3 esphome/components/cgo600/web_assets.py
 ```
 
-CI currently runs:
+`esphome upload` only uploads the last build; run `compile` first after changes.
 
-```bash
-pio run -d firmware
-pio run -d firmware -t buildfs
-```
+CI compiles `esphome/cgo600.yaml` and the install configuration.
 
-## Firmware Tests
-There is no automated firmware test setup yet.
-- No `pio test` workflow is configured
-- No embedded unit-test framework is checked in
-- No single-test command exists today because there are no firmware tests
+## Tests
+There is no automated test setup. Validation is manual:
+1. Compile both configurations.
+2. Flash hardware if needed.
+3. Verify the logs, BLE connection, Home Assistant entities, the dashboard and the ride history.
 
-Current firmware validation is manual:
-1. Build with `pio run -d firmware`.
-2. Build the filesystem image with `pio run -d firmware -t buildfs` if web assets changed.
-3. Flash hardware if needed.
-4. Verify serial logs, BLE connection, MQTT behavior, and web UI.
-
-## Code Style: Firmware C++
-- Follow the existing Arduino/C++ style in `firmware/src/`.
-- Use 4-space indentation and same-line opening braces.
-- Include platform/library headers before local headers.
-- Use `PascalCase` for classes/structs.
-- Preserve current naming patterns for locals and members, including leading-underscore members.
-- Keep protocol constants and macros in their existing uppercase style.
-- Prefer bounded buffer operations such as `snprintf` and careful `strncpy` usage.
-- Keep serial log prefixes consistent, such as `[BLE]`, `[MQTT]`, `[WEB]`, `[BOOT]`, and `[OTA]`.
-
-## Firmware Error Handling
-- Prefer retries, reconnect loops, and explicit status changes.
-- Log operational failures to serial output with enough context to diagnose device issues.
-- Treat WiFi, BLE, and MQTT behavior as long-running and resilient.
+## Code Style
+- Follow ESPHome conventions: `snake_case` methods, trailing-underscore protected members, `this->`,
+  `ESP_LOG*` with the component tags (`cgo600`, `cgo600.rides`, `cgo600.web`).
+- Use 4-space indentation and same-line opening braces (see `.clang-format`).
+- Prefer bounded buffer operations such as `snprintf`.
+- Code running on the HTTP server task must not touch BLE or NVS directly; `defer()` it to the main loop.
+- ESPHome's ESP-IDF web server only sends status codes 200, 404 and 409; anything else becomes 500.
 
 ## Naming
-- Keep telemetry names stable: `battery`, `speed_kmh`, `avg_speed_kmh`, `total_range_km`, `serial_number`, `light_on`.
-- Keep MQTT suffixes stable: `battery`, `speed`, `avg_speed`, `range`, `light`, `serial_number`, `last_connected`.
+- Keep entity keys stable: `battery`, `speed`, `max_speed`, `avg_speed`, `trip_distance`, `trip_duration`,
+  `remaining_range`, `range`, `serial_number`, `ble_status`, `light`.
+- Keep the dashboard JSON fields and the `esphome.cgo600_ride` event name stable.
 
 ## Files To Treat Carefully
-- `firmware/.pio/`: build output, ignored by Git
-- `firmware/data/`: generated and git-ignored; edit `firmware/web/` instead
-- `firmware/web/`: changes require `uploadfs` for on-device verification, which also wipes the ride history stored on LittleFS
-- `firmware/platformio.ini`: changes affect CI and local firmware builds
+- `esphome/.esphome/`: build output, ignored by Git
+- `esphome/secrets.yaml`: local credentials, ignored by Git
+- `esphome/components/cgo600/ride_log.h`: changing the `Store` layout needs a new `STORE_MAGIC`,
+  which discards stored rides
 
 ## Workflow Notes
-- For firmware-only work, at minimum ensure `pio run -d firmware` succeeds.
-- For protocol or MQTT changes, keep field IDs, MQTT suffixes, and discovery payloads stable.
+- At minimum ensure both configurations compile.
+- For protocol changes, keep field IDs and entity keys stable.
 - Be explicit that the repo currently has no automated tests or lint gates.
 - This setup may be used for live debugging; prefer adding observability that can be read remotely when safe.
 - The user allows live firmware builds and uploads for diagnostics and fixes when needed.
-- If remote log streaming is available, treat live log inspection as a normal debugging path.
+- Live logs are available over WiFi with `esphome logs`; treat them as a normal debugging path.

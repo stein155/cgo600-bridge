@@ -99,7 +99,7 @@ function renderLightRow(lightOn, lightDisabled) {
             value: lightOn,
             onChange: lightDisabled ? null : () => {
                 const next = !lightOn;
-                apiSendJson('/api/light', 'POST', { on: next })
+                fetch('/api/light?on=' + (next ? 1 : 0), { method: 'POST' })
                     .then(r => { if (!r.ok) throw new Error(); })
                     .catch(() => toast(T.t('save_failed'), 'error'));
             },

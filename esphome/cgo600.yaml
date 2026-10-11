@@ -22,6 +22,7 @@ esp32:
 logger:
 
 api:
+  homeassistant_services: true
   encryption:
     key: !secret api_encryption_key
 
@@ -36,6 +37,10 @@ wifi:
     ssid: CGO600-Setup
 
 captive_portal:
+
+# Wall-clock time for the ride history.
+time:
+  - platform: sntp
 
 external_components:
   - source:
@@ -61,6 +66,15 @@ cgo600:
   id: bike
   device_name: CGO600
   poll_interval: 1s
+  max_rides: 50
+  # Every inferred ride is also sent to Home Assistant as an event.
+  on_ride:
+    - homeassistant.event:
+        event: esphome.cgo600_ride
+        data:
+          distance_km: !lambda 'return str_sprintf("%.1f", distance_km);'
+          duration_s: !lambda 'return to_string(duration_s);'
+          battery_used: !lambda 'return to_string(battery_used);'
 
 sensor:
   - platform: cgo600

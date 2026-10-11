@@ -1,8 +1,7 @@
 #pragma once
 
 // Framework-neutral CGO600 protocol helpers: frame building, CRC and field
-// decoding. Mirrors firmware/src/protocol.* and the field decoding in
-// firmware/src/bike_state.cpp.
+// decoding.
 
 #include <cstddef>
 #include <cstdint>
@@ -66,8 +65,9 @@ class FrameParser {
 
     void reset() { this->len_ = 0; }
     // Appends data and decodes every complete frame. Returns true if any field
-    // was decoded; frames failing the CRC check are counted in bad_crc.
-    bool feed(BikeState &state, const uint8_t *data, size_t len, uint32_t &bad_crc);
+    // was decoded. saw_trip is set when a frame carried the trip counters;
+    // frames failing the CRC check are counted in bad_crc.
+    bool feed(BikeState &state, const uint8_t *data, size_t len, bool &saw_trip, uint32_t &bad_crc);
 
  private:
     void append_(const uint8_t *data, size_t len);

@@ -4,6 +4,7 @@
 
 #include <cctype>
 #include <cstring>
+#include <ctime>
 
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
@@ -24,6 +25,13 @@ static constexpr uint16_t CONN_MIN_INTERVAL = 0x18;  // 30 ms
 static constexpr uint16_t CONN_MAX_INTERVAL = 0x28;  // 50 ms
 static constexpr uint16_t CONN_LATENCY = 0;
 static constexpr uint16_t CONN_SUPERVISION_TIMEOUT = 1000;  // 10 s
+// Anything before 2020 means the clock has not been set by a time source yet.
+static constexpr time_t MIN_VALID_EPOCH = 1577836800;
+
+static uint32_t epoch_now() {
+    const time_t now = ::time(nullptr);
+    return now >= MIN_VALID_EPOCH ? (uint32_t) now : 0;
+}
 
 static const espbt::ESPBTUUID NUS_SERVICE_UUID = espbt::ESPBTUUID::from_raw("6e400001-b5a3-f393-e0a9-e50e24dcca9e");
 static const espbt::ESPBTUUID NUS_RX_UUID = espbt::ESPBTUUID::from_raw("6e400002-b5a3-f393-e0a9-e50e24dcca9e");
@@ -46,6 +54,7 @@ static bool contains_ignore_case(const std::string &haystack, const std::string 
 
 void CGO600Component::setup() {
     BLEClientBase::setup();
+    this->ride_log_.setup(this->max_rides_);
     this->update_ble_status_();
 }
 
@@ -53,6 +62,8 @@ void CGO600Component::dump_config() {
     ESP_LOGCONFIG(TAG, "CGO600:");
     ESP_LOGCONFIG(TAG, "  Device name: %s", this->device_name_.c_str());
     ESP_LOGCONFIG(TAG, "  Poll interval: %u ms", (unsigned) this->poll_interval_ms_);
+    ESP_LOGCONFIG(TAG, "  Rides stored: %u of %u", (unsigned) this->ride_log_.count(),
+                  (unsigned) this->ride_log_.max_rides());
     LOG_SENSOR("  ", "Battery", this->battery_sensor_);
     LOG_SENSOR("  ", "Speed", this->speed_sensor_);
     LOG_SENSOR("  ", "Max speed", this->max_speed_sensor_);
@@ -137,12 +148,29 @@ bool CGO600Component::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_i
             this->update_ble_status_();
             break;
 
-        case ESP_GATTC_NOTIFY_EVT:
+        case ESP_GATTC_NOTIFY_EVT: {
             if (param->notify.handle != this->tx_handle_)
                 break;
-            if (this->parser_.feed(this->state_, param->notify.value, param->notify.value_len, this->bad_crc_count_))
+            bool saw_trip = false;
+            bool changed;
+            {
+                LockGuard guard(this->state_mutex_);
+                changed = this->parser_.feed(this->state_, param->notify.value, param->notify.value_len, saw_trip,
+                                             this->bad_crc_count_);
+            }
+            if (changed)
                 this->publish_state_();
+            // A frame carrying the trip counters is a confirmed current reading:
+            // its receive time anchors the ride window.
+            RideRecord ride;
+            if (saw_trip && this->ride_log_.observe(this->state_, epoch_now(), ride)) {
+                const int battery_used = (ride.battery_start >= 0 && ride.battery_end >= 0)
+                                             ? ride.battery_start - ride.battery_end
+                                             : -1;
+                this->ride_callback_.call(ride.distance_km, (uint32_t) ride.duration_s, battery_used);
+            }
             break;
+        }
 
         case ESP_GATTC_DISCONNECT_EVT:
         case ESP_GATTC_CLOSE_EVT:
@@ -221,6 +249,9 @@ void CGO600Component::run_handshake_step_(uint32_t now) {
     this->phase_ = Phase::POLLING;
     this->last_poll_ = now;
     ESP_LOGI(TAG, "Handshake complete, polling every %u ms", (unsigned) this->poll_interval_ms_);
+    const uint32_t connected_at = epoch_now();
+    if (connected_at != 0)
+        this->last_connected_at_ = connected_at;
     this->update_ble_status_();
 }
 

@@ -9,9 +9,11 @@
 #include "esphome/components/sensor/sensor.h"
 #include "esphome/components/switch/switch.h"
 #include "esphome/components/text_sensor/text_sensor.h"
+#include "esphome/core/automation.h"
 #include "esphome/core/component.h"
 #include "esphome/core/helpers.h"
 #include "cgo600_protocol.h"
+#include "ride_log.h"
 
 namespace esphome::cgo600 {
 
@@ -35,6 +37,10 @@ class CGO600Component : public esp32_ble_client::BLEClientBase {
     void set_device_name(const std::string &name) { this->device_name_ = name; }
     void set_poll_interval(uint32_t ms) { this->poll_interval_ms_ = ms; }
     void set_pause_scan_while_connected(bool pause) { this->pause_scan_while_connected_ = pause; }
+    void set_max_rides(uint16_t max_rides) { this->max_rides_ = max_rides; }
+    void add_on_ride_callback(std::function<void(float, uint32_t, int)> &&callback) {
+        this->ride_callback_.add(std::move(callback));
+    }
 
     void set_battery_sensor(sensor::Sensor *s) { this->battery_sensor_ = s; }
     void set_speed_sensor(sensor::Sensor *s) { this->speed_sensor_ = s; }
@@ -48,8 +54,21 @@ class CGO600Component : public esp32_ble_client::BLEClientBase {
     void set_ble_status_text_sensor(text_sensor::TextSensor *s) { this->ble_status_text_sensor_ = s; }
     void set_light_switch(switch_::Switch *s) { this->light_switch_ = s; }
 
-    // Called by the light switch. Returns false when the bike is not connected.
+    // Called by the light switch and the web UI. Returns false when the bike
+    // is not connected.
     bool set_light(bool on);
+
+    // Accessors for the web UI.
+    // Copy of the telemetry; safe to call from the HTTP server task.
+    protocol::BikeState bike_state() const {
+        LockGuard guard(this->state_mutex_);
+        return this->state_;
+    }
+    const char *ble_status() const { return this->last_ble_status_ != nullptr ? this->last_ble_status_ : "searching"; }
+    const std::string &device_name() const { return this->device_name_; }
+    uint32_t poll_interval_ms() const { return this->poll_interval_ms_; }
+    uint32_t last_connected_at() const { return this->last_connected_at_; }
+    RideLog &rides() { return this->ride_log_; }
 
  protected:
     enum class Phase : uint8_t { IDLE, HANDSHAKE, POLLING };
@@ -85,6 +104,11 @@ class CGO600Component : public esp32_ble_client::BLEClientBase {
     uint16_t rx_handle_{0};
 
     protocol::BikeState state_;
+    mutable Mutex state_mutex_;
+    RideLog ride_log_;
+    uint16_t max_rides_{20};
+    uint32_t last_connected_at_{0};
+    CallbackManager<void(float, uint32_t, int)> ride_callback_;
     protocol::FrameParser parser_;
     const char *last_ble_status_{nullptr};
 
@@ -99,6 +123,18 @@ class CGO600Component : public esp32_ble_client::BLEClientBase {
     text_sensor::TextSensor *serial_number_text_sensor_{nullptr};
     text_sensor::TextSensor *ble_status_text_sensor_{nullptr};
     switch_::Switch *light_switch_{nullptr};
+};
+
+// Fires for every inferred ride with distance_km, duration_s and battery_used
+// (percentage points, -1 if unknown).
+class RideTrigger : public Trigger<float, uint32_t, int> {
+ public:
+    explicit RideTrigger(CGO600Component *parent) {
+        parent->add_on_ride_callback(
+            [this](float distance_km, uint32_t duration_s, int battery_used) {
+                this->trigger(distance_km, duration_s, battery_used);
+            });
+    }
 };
 
 class CGO600LightSwitch : public switch_::Switch, public Parented<CGO600Component> {

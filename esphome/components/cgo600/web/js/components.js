@@ -27,6 +27,7 @@ function textInput(opts) {
         placeholder: opts.placeholder || '',
         autocomplete: opts.autocomplete || 'off',
     });
+    if (opts.readonly) input.readOnly = true;
     if (opts.onChange) input.addEventListener('input', () => opts.onChange(input.value));
     const wrap = el('div', { class: 'text-input' + (opts.mono ? ' mono' : '') }, [input]);
     if (opts.suffix) wrap.appendChild(el('span', { class: 'suffix', text: opts.suffix }));

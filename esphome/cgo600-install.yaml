@@ -28,6 +28,7 @@ esp32:
 logger:
 
 api:
+  homeassistant_services: true
 
 ota:
   - platform: esphome
@@ -38,7 +39,13 @@ wifi:
 
 captive_portal:
 
+# Wall-clock time for the ride history.
+time:
+  - platform: sntp
+
 improv_serial:
+  # After WiFi setup the web installer offers a link to the bridge dashboard.
+  next_url: http://{{ip_address}}/
 
 dashboard_import:
   package_import_url: github://stein155/cgo600-bridge/esphome/cgo600-install.yaml@main
@@ -66,6 +73,15 @@ bluetooth_proxy:
 
 cgo600:
   device_name: CGO600
+  max_rides: 50
+  # Every inferred ride is also sent to Home Assistant as an event.
+  on_ride:
+    - homeassistant.event:
+        event: esphome.cgo600_ride
+        data:
+          distance_km: !lambda 'return str_sprintf("%.1f", distance_km);'
+          duration_s: !lambda 'return to_string(duration_s);'
+          battery_used: !lambda 'return to_string(battery_used);'
 
 sensor:
   - platform: cgo600

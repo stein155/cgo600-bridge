@@ -19,13 +19,6 @@ function api(path, opts) {
         return r.json().catch(() => ({}));
     });
 }
-function apiSendJson(path, method, body) {
-    return fetch(path, {
-        method: method || 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(body),
-    });
-}
 
 // ─── Toast ───────────────────────────────────────────────
 let toastTimer = null;

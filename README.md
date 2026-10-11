@@ -1,6 +1,6 @@
 # CGO600 Smart Bridge
 
-Standalone ESP32 firmware that reads live telemetry from a **Tenways CGO600** e-bike over Bluetooth Low Energy and forwards it to **Home Assistant** via MQTT. Includes a built-in, multilingual web dashboard (installable as a PWA) for live monitoring, light control, and a local ride history — no computer needed after initial setup.
+ESP32 firmware, built on [ESPHome](https://esphome.io), that reads live telemetry from a **Tenways CGO600** e-bike over Bluetooth Low Energy and brings it into **Home Assistant**. The bridge also serves its own multilingual web dashboard (installable as a PWA) for live monitoring, light control and a ride history. Once installed, no computer is needed.
 
 > "TENWAYS" and "CGO600" are trademarks of TENWAYS. This is an unofficial community project, not affiliated with or endorsed by TENWAYS — use at your own risk.
 
@@ -8,7 +8,7 @@ Standalone ESP32 firmware that reads live telemetry from a **Tenways CGO600** e-
 
 I own a Tenways CGO600 and run a smart home built around Home Assistant. I like to integrate as many devices as possible into Home Assistant, including devices that do not expose a ready-made integration.
 
-For this project I reverse engineered the bike's Bluetooth protocol and built ESP32 firmware that acts as a small BLE-to-MQTT gateway. In my setup the ESP32 is mounted in the shed where the bike is parked. When the bike connects on departure or arrival, the gateway reads the latest data and publishes it to Home Assistant via MQTT.
+For this project I reverse engineered the bike's Bluetooth protocol and built an ESP32 bridge for it. In my setup the ESP32 is mounted in the shed where the bike is parked. When the bike connects on departure or arrival, the bridge reads the latest data and reports it to Home Assistant.
 
 ## Screenshots
 
@@ -16,112 +16,31 @@ For this project I reverse engineered the bike's Bluetooth protocol and built ES
 |---|---|---|
 | ![Dashboard](docs/dashboard.jpeg) | ![Rides](docs/rides.jpeg) | ![Config](docs/config.jpeg) |
 
-## Home Assistant entities
+## Features
 
-| Sensor | Unit | MQTT topic |
-|---|---|---|
-| Battery | % | `cgo600/sensor/battery/state` |
-| Speed | km/h | `cgo600/sensor/speed/state` |
-| Max speed | km/h | `cgo600/sensor/max_speed/state` |
-| Average speed | km/h | `cgo600/sensor/avg_speed/state` |
-| Trip distance | km | `cgo600/sensor/trip_distance/state` |
-| Trip duration | s | `cgo600/sensor/trip_duration/state` |
-| Remaining range | km | `cgo600/sensor/remaining_range/state` |
-| Total range | km | `cgo600/sensor/range/state` |
-| Serial number | — | `cgo600/sensor/serial_number/state` |
-| Last connected | ISO 8601 UTC | `cgo600/sensor/last_connected/state` |
-| BLE status | searching/connecting/handshake/connected | `cgo600/sensor/ble_status/state` |
-| Light | on/off | `cgo600/light/state` |
-
-The light can also be controlled from Home Assistant by publishing `on` or `off` to `cgo600/light/set`.
-
-All entities are registered in Home Assistant automatically via MQTT discovery. State topics are retained, so Home Assistant keeps the last known values after a restart even while the bike is away. The topic prefix (`cgo600`) is configurable.
-
-## Ride history
-
-The bridge only sees the bike when it reconnects (typically on departure or arrival), so it infers rides from the time and distance between two check-ins. Each inferred ride records its window, distance, duration, battery delta, and average/max speed. Rides are stored locally on the ESP32 and shown on the dashboard's Rides tab.
-
----
-
-## Requirements
-
-- ESP32 dev board — recommended: **ESP32-WROOM-32U** (external antenna connector for better BLE range). This is what the project runs on in practice; other ESP32 boards will work but WROOM-32U is the tested configuration.
-- USB cable for initial flashing
-
----
+- **Home Assistant entities** through the native ESPHome API, discovered automatically
+- **Web dashboard** on the bridge: battery, range, light, lifetime totals and ride history
+- **Ride history** inferred from check-ins, stored on the ESP32 and sent to Home Assistant as events
+- **Light control** from Home Assistant and the dashboard
+- **Bluetooth proxy** for other BLE devices near the bike
+- **No pairing**: the bike is found by name or by its Bluetooth service, no MAC address needed
 
 ## Installation
 
 ### Install from the browser
 
-The easiest way: open the **[web installer](https://stein155.github.io/cgo600-bridge/)** in Chrome or Edge on a desktop computer, connect the ESP32 over USB and click *Install*. You can choose between two variants:
+Open the **[web installer](https://stein155.github.io/cgo600-bridge/)** in Chrome or Edge on a desktop computer, connect the ESP32 over USB and click *Install*.
 
-- **ESPHome** (recommended for Home Assistant): set up WiFi in the browser right after flashing. Home Assistant then discovers the bridge automatically, and it also works as a Bluetooth proxy.
-- **Standalone**: the firmware described in this README, with the web dashboard, ride history and MQTT. After flashing, set up WiFi through the `CGO600-Setup` hotspot.
+1. After flashing, enter your WiFi details in the installer. If you skip this, connect to the *CGO600 Bridge* hotspot instead.
+2. Click *Visit device* to open the dashboard and bookmark it. The address (IP and `.local` name) is also shown under *Settings → System*.
+3. Add the bridge in Home Assistant under *Settings → Devices & services*; it is usually discovered automatically.
+4. Switch the bike on near the bridge; it connects by itself.
 
-The installer is rebuilt from the latest release by `.github/workflows/installer.yml`.
+Updates are installed over WiFi from the ESPHome dashboard. In the ESPHome add-on, *Adopt* the bridge to customise its configuration.
 
-### Pre-built firmware
+### Add to your own ESPHome configuration
 
-Download the four `.bin` files from the [latest release](../../releases/latest) and flash with [esptool](https://docs.espressif.com/projects/esptool/en/latest/):
-
-```bash
-esptool.py --chip esp32 --baud 460800 \
-  write_flash \
-  0x1000   cgo600-bootloader.bin \
-  0x8000   cgo600-partitions.bin \
-  0x10000  cgo600-firmware.bin \
-  0x3D0000 cgo600-littlefs.bin
-```
-
-### Build from source
-
-Install [PlatformIO](https://platformio.org/install/cli), then from the repo root:
-
-```bash
-pio run -d firmware -t upload
-pio run -d firmware -t uploadfs
-```
-
-Add `--upload-port <port>` if auto-detection fails:
-
-```bash
-pio run -d firmware -t upload --upload-port <port>
-```
-
----
-
-## First setup
-
-1. After flashing, the ESP32 creates a WiFi access point called **CGO600-Setup**.
-2. Connect your phone or laptop to that network.
-3. A captive portal opens — select your WiFi and enter the password.
-4. The device connects to your network and is usually reachable at **http://cgo600.local/** on networks that support mDNS. Otherwise, use the ESP32 IP address shown by your router.
-
----
-
-## Updating
-
-After initial USB flashing, updates can be done over WiFi. Use `cgo600.local` when mDNS works, or the ESP32 IP address otherwise:
-
-```bash
-pio run -d firmware -t upload --upload-port cgo600.local
-```
-
-If you changed the web interface:
-
-```bash
-pio run -d firmware -t buildfs
-pio run -d firmware -t uploadfs --upload-port cgo600.local
-```
-
----
-
-## ESPHome component (experimental)
-
-As an alternative to the standalone firmware, the bike can be integrated through [ESPHome](https://esphome.io) with the `cgo600` external component in `esphome/components/`. ESPHome then handles WiFi, OTA updates and the native Home Assistant API. The standalone web dashboard, MQTT and the ride history are not part of this variant.
-
-The component finds the bike by advertised name or by its Nordic UART service, so no MAC address is needed. Add it to an existing ESPHome configuration:
+The `cgo600` component can be added to any ESP32 configuration that uses the `esp-idf` framework:
 
 ```yaml
 external_components:
@@ -131,6 +50,9 @@ external_components:
       path: esphome/components
     components: [cgo600]
 
+time:
+  - platform: sntp   # wall-clock time for the ride history
+
 esp32_ble_tracker:
   scan_parameters:
     active: true
@@ -139,9 +61,9 @@ esp32_ble_tracker:
     window: 160ms
 
 cgo600:
-  id: bike
   device_name: CGO600   # substring of the advertised name (default: CGO600)
   poll_interval: 1s     # 500ms to 10s (default: 1s)
+  max_rides: 50         # rides kept on the device, 1 to 50 (default: 20)
 
 sensor:
   - platform: cgo600
@@ -150,28 +72,74 @@ sensor:
     range:
       name: Total range
 
-text_sensor:
-  - platform: cgo600
-    ble_status:
-      name: BLE status
-
 switch:
   - platform: cgo600
     light:
       name: Light
 ```
 
-| Platform | Keys |
-|---|---|
-| `sensor` | `battery`, `speed`, `max_speed`, `avg_speed`, `trip_distance`, `trip_duration`, `remaining_range`, `range` |
-| `text_sensor` | `serial_number`, `ble_status` |
-| `switch` | `light` |
+[`esphome/cgo600-install.yaml`](esphome/cgo600-install.yaml) is the complete configuration the web installer flashes, and [`esphome/cgo600.yaml`](esphome/cgo600.yaml) is a development example. Copy `esphome/secrets.yaml.example` to `esphome/secrets.yaml` to compile it locally.
 
-All keys are optional. A complete example is in [`esphome/cgo600.yaml`](esphome/cgo600.yaml); copy `esphome/secrets.yaml.example` to `esphome/secrets.yaml` to compile it locally. The component requires the `esp-idf` framework.
+## Home Assistant
 
-The component uses one BLE connection slot. Alongside a `bluetooth_proxy`, keep the total within `esp32_ble: max_connections` (default 3), for example `connection_slots: 2` for the proxy. While the bike is connected the component pauses scanning, because scanning during the connection caused regular disconnects. A proxy therefore receives no advertisements during that time. Set `pause_scan_while_connected: false` if the proxy matters more than a stable bike connection.
+| Platform | Key | Unit |
+|---|---|---|
+| `sensor` | `battery` | % |
+| `sensor` | `speed`, `max_speed`, `avg_speed` | km/h |
+| `sensor` | `trip_distance`, `remaining_range`, `range` | km |
+| `sensor` | `trip_duration` | s |
+| `text_sensor` | `serial_number`, `ble_status` | — |
+| `switch` | `light` | — |
 
-[`esphome/cgo600-install.yaml`](esphome/cgo600-install.yaml) is the ready-made configuration that the web installer flashes. It sets up WiFi through Improv and a fallback hotspot, enables the Bluetooth proxy, and supports adoption in the ESPHome dashboard.
+All keys are optional. `range` is the bike's total odometer.
+
+Every inferred ride fires the `on_ride` trigger with `distance_km`, `duration_s` and `battery_used`. The ready-made configuration forwards it as a Home Assistant event, which you can use in automations:
+
+```yaml
+cgo600:
+  on_ride:
+    - homeassistant.event:
+        event: esphome.cgo600_ride
+        data:
+          distance_km: !lambda 'return str_sprintf("%.1f", distance_km);'
+```
+
+(`api: homeassistant_services: true` is required for `homeassistant.event`.)
+
+## Web dashboard
+
+The dashboard is embedded in the firmware and served at the bridge's address. The bridge settings come from the ESPHome configuration, so the dashboard shows them read-only. It keeps the display preferences, the ride history and a restart button. Because the dashboard serves `/`, it cannot be combined with ESPHome's own `web_server` component; set `web_ui: false` to use that instead.
+
+The dashboard talks to a small JSON API:
+
+| Method | Path | Purpose |
+|---|---|---|
+| GET | `/api/state` | Live telemetry and connection status |
+| GET | `/api/config` | Configuration, address and firmware version |
+| GET | `/api/rides` | Stored rides |
+| POST | `/api/light?on=0\|1` | Switch the light |
+| POST | `/api/rides/clear` | Delete all rides |
+| POST | `/api/rides/import?start=…&end=…&distance=…&duration=…` | Import one ride (epoch seconds, km, s) |
+| POST | `/api/restart` | Restart the bridge |
+
+## Ride history
+
+The bridge only sees the bike when it connects, typically on departure or arrival, so it infers rides from the time and counter difference between two check-ins. Each ride records its window, distance, duration, battery delta and average/max speed. Rides are stored in the ESP32's flash and survive updates.
+
+## Bluetooth notes
+
+The component uses one BLE connection slot. Alongside a `bluetooth_proxy`, keep the total within `esp32_ble: max_connections` (default 3), for example `connection_slots: 2` for the proxy.
+
+While the bike is connected, the component pauses scanning and requests a relaxed connection interval with a 10 s supervision timeout. Scanning during the connection caused regular disconnects. As a result, a proxy receives no advertisements while the bike is connected. Set `pause_scan_while_connected: false` if the proxy matters more than a stable bike connection.
+
+## Migrating from the standalone firmware
+
+Earlier versions were standalone PlatformIO firmware with MQTT; the last release of it is still available on the releases page. To move over:
+
+1. Save your rides from the old dashboard: open `http://<bridge>/api/rides` and save the JSON.
+2. Install with the web installer over USB. Alternatively, flash `cgo600-bridge-ota.bin` from the release over WiFi with the old firmware's OTA (`espota.py -i <bridge-ip> -f cgo600-bridge-ota.bin`).
+3. In the new dashboard, go to *Settings → Ride history → Import rides* and select the saved file.
+4. Remove the old MQTT entities from Home Assistant.
 
 ## BLE protocol
 
@@ -184,7 +152,7 @@ Read  0x52 [len] [field_ids...] [CRC16_lo] [CRC16_hi] 0x45
 Write 0x57 [len] [payload...]   [CRC16_lo] [CRC16_hi] 0x45
 ```
 
-CRC16 is computed over all bytes from the start byte up to (but not including) the CRC bytes, using the same lookup table as the Python reference implementation.
+The checksum is CRC-16/MODBUS (polynomial `0xA001` reflected, initial value `0xFFFF`), computed over all bytes from the start byte up to the CRC. Requests carry it low byte first; frames from the bike carry it high byte first.
 
 ### Field IDs
 
@@ -196,65 +164,34 @@ CRC16 is computed over all bytes from the start byte up to (but not including) t
 | `0x13` | Average speed | uint16 BE ÷ 10 → km/h |
 | `0x14` | Trip distance | uint16 BE ÷ 10 → km |
 | `0x15` | Trip duration | uint16 BE → seconds |
-| `0x16` | Remaining range | uint16 BE ÷ 10 → km |
-| `0x17` | Total range | uint16 BE ÷ 10 → km |
+| `0x16` | Remaining range | uint16 BE ÷ 10 → km (`0xFFFF` = unknown) |
+| `0x17` | Total range (odometer) | uint16 BE ÷ 10 → km |
 | `0x1A` | Battery | uint8 → % |
 | `0x21` | Light | uint8 (0 = off, 1 = on) |
-
----
 
 ## Repository layout
 
 ```
 esphome/
-  cgo600.yaml           Example ESPHome configuration
-  cgo600-install.yaml   Ready-made configuration flashed by the web installer
-  components/cgo600/    ESPHome external component (BLE client, sensors, light switch)
+  cgo600-install.yaml       Ready-made configuration flashed by the web installer
+  cgo600.yaml               Development example configuration
+  components/cgo600/
+    __init__.py             Configuration schema and code generation
+    cgo600.h/.cpp           BLE client: discovery, handshake, polling, entities
+    cgo600_protocol.h/.cpp  Frames, CRC and field decoding
+    ride_log.h/.cpp         Ride inference and flash storage
+    web_ui.h/.cpp           Dashboard and JSON API on the ESPHome web server
+    web_assets.py           Bundles and gzips web/ into the firmware
+    web/                    Dashboard sources (no framework)
+      js/                   App modules, bundled into app.js in a fixed order
+      css/                  Styles, bundled into style.css in filename order
+    sensor.py, text_sensor.py, switch.py   Entity platforms
 installer/
-  index.html            Web installer page (esp-web-tools), published to GitHub Pages
-  build_site.py         Assembles the page, manifests and firmware images
-  local_esphome_config.py  Points the install config at the local component for CI builds
-firmware/
-  platformio.ini        Build configuration
-  partitions.csv        Custom partition layout
-  src/
-    main.cpp            WiFi, mDNS, OTA, orchestration
-    config.h/.cpp       Persistent configuration (NVS)
-    protocol.h/.cpp     Frame building, parsing, CRC16
-    bike_state.h/.cpp   Telemetry data model and field decoding
-    ble_client.h/.cpp   BLE scan, connect, handshake, polling
-    mqtt_ha.h/.cpp      MQTT publishing and Home Assistant discovery
-    ride_log.h/.cpp     Ride inference and local history storage
-    web_server.h/.cpp   HTTP API and web interface serving
-    logger.h/.cpp       Logging helpers
-    reset_reason.h      Boot/reset reason decoding
-  scripts/
-    build_web.py        Bundles web/ into data/ (runs automatically on every build)
-  web/                  Web UI sources (single-page app, no framework)
-    index.html          Dashboard shell
-    js/                 App modules, bundled into app.js in a fixed order
-      views/            Dashboard, rides, ride detail, settings, tab bar
-    css/                Styles, bundled into style.css in filename order
-    i18n.js             UI translations and theme handling
-    config.html         Redirect shim (/config.html → /#settings)
-    manifest.json       PWA manifest
-    sw.js               Service worker (offline shell cache)
-  data/                 Generated, gzipped LittleFS content (git-ignored)
+  index.html                Web installer page (esp-web-tools), published to GitHub Pages
+  build_site.py             Assembles the page, manifest and firmware image
+  local_esphome_config.py   Points the install config at the local component for CI builds
 ```
 
-### Partition layout
+### Dashboard development
 
-| Partition | Size | Purpose |
-|---|---|---|
-| app0 | 1.9 MB | Firmware (active) |
-| app1 | 1.9 MB | Firmware (OTA staging) |
-| spiffs | 192 KB | Web interface (LittleFS) |
-| nvs | 20 KB | Configuration storage |
-
-The partition label is `spiffs` for ESP32 compatibility, but PlatformIO builds a LittleFS image for it.
-
-### Web UI development
-
-Edit the sources in `firmware/web/`, never `firmware/data/`: that directory is regenerated from `web/` on every PlatformIO build. Every file is stored gzipped; the web server serves `<name>.gz` for `<name>`. A new JS file must be added to `JS_ORDER` in `firmware/scripts/build_web.py`; CSS files are bundled in filename order. To build the bundle without PlatformIO, run `python3 firmware/scripts/build_web.py`.
-
-> **Note:** `uploadfs` replaces the whole LittleFS partition, which also holds the ride history. Flashing the web UI therefore clears the stored rides.
+Edit the sources in `esphome/components/cgo600/web/`. They are bundled and embedded on every `esphome compile`. A new JS file must be added to `JS_ORDER` in `web_assets.py`; CSS files are bundled in filename order. Run `python3 esphome/components/cgo600/web_assets.py` to see the bundle sizes.
