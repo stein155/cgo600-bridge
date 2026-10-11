@@ -107,6 +107,58 @@ pio run -d firmware -t uploadfs --upload-port cgo600.local
 
 ---
 
+## ESPHome component (experimental)
+
+As an alternative to the standalone firmware, the bike can be integrated through [ESPHome](https://esphome.io) with the `cgo600` external component in `esphome/components/`. ESPHome then handles WiFi, OTA updates and the native Home Assistant API. The standalone web dashboard, MQTT and the ride history are not part of this variant.
+
+The component finds the bike by advertised name or by its Nordic UART service, so no MAC address is needed. Add it to an existing ESPHome configuration:
+
+```yaml
+external_components:
+  - source:
+      type: git
+      url: https://github.com/stein155/cgo600-bridge
+      path: esphome/components
+    components: [cgo600]
+
+esp32_ble_tracker:
+  scan_parameters:
+    active: true
+    continuous: true
+    interval: 320ms
+    window: 160ms
+
+cgo600:
+  id: bike
+  device_name: CGO600   # substring of the advertised name (default: CGO600)
+  poll_interval: 1s     # 500ms to 10s (default: 1s)
+
+sensor:
+  - platform: cgo600
+    battery:
+      name: Battery
+    range:
+      name: Total range
+
+text_sensor:
+  - platform: cgo600
+    ble_status:
+      name: BLE status
+
+switch:
+  - platform: cgo600
+    light:
+      name: Light
+```
+
+| Platform | Keys |
+|---|---|
+| `sensor` | `battery`, `speed`, `max_speed`, `avg_speed`, `trip_distance`, `trip_duration`, `remaining_range`, `range` |
+| `text_sensor` | `serial_number`, `ble_status` |
+| `switch` | `light` |
+
+All keys are optional. A complete example is in [`esphome/cgo600.yaml`](esphome/cgo600.yaml); copy `esphome/secrets.yaml.example` to `esphome/secrets.yaml` to compile it locally. The component requires the `esp-idf` framework.
+
 ## BLE protocol
 
 The CGO600 exposes a Nordic UART Service (NUS) over BLE. Commands are written to the RX characteristic; telemetry replies arrive as notifications on the TX characteristic. The protocol details below come from reverse engineering and may differ across bike/display firmware versions.
@@ -140,6 +192,9 @@ CRC16 is computed over all bytes from the start byte up to (but not including) t
 ## Repository layout
 
 ```
+esphome/
+  cgo600.yaml           Example ESPHome configuration
+  components/cgo600/    ESPHome external component (BLE client, sensors, light switch)
 firmware/
   platformio.ini        Build configuration
   partitions.csv        Custom partition layout

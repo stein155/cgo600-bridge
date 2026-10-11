@@ -1,0 +1,89 @@
+# Example ESPHome configuration for the CGO600 component.
+#
+# This file uses the component from this checkout. To use it from another
+# configuration, point external_components at GitHub instead:
+#
+#   external_components:
+#     - source:
+#         type: git
+#         url: https://github.com/stein155/cgo600-bridge
+#         path: esphome/components
+#       components: [cgo600]
+
+esphome:
+  name: cgo600
+  friendly_name: CGO600
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+logger:
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  ap:
+    ssid: CGO600-Setup
+
+captive_portal:
+
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [cgo600]
+
+esp32_ble_tracker:
+  scan_parameters:
+    # The bike is only in range briefly on departure and arrival, so scan with
+    # a high duty cycle while leaving airtime for WiFi.
+    active: true
+    continuous: true
+    interval: 320ms
+    window: 160ms
+
+cgo600:
+  id: bike
+  device_name: CGO600
+  poll_interval: 1s
+
+sensor:
+  - platform: cgo600
+    battery:
+      name: Battery
+    speed:
+      name: Speed
+    max_speed:
+      name: Max speed
+    avg_speed:
+      name: Average speed
+    trip_distance:
+      name: Trip distance
+    trip_duration:
+      name: Trip duration
+    remaining_range:
+      name: Remaining range
+    range:
+      name: Total range
+
+text_sensor:
+  - platform: cgo600
+    serial_number:
+      name: Serial number
+    ble_status:
+      name: BLE status
+
+switch:
+  - platform: cgo600
+    light:
+      name: Light

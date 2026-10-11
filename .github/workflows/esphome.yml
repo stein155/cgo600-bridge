@@ -1,0 +1,38 @@
+name: ESPHome Component
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'esphome/**'
+      - '.github/workflows/esphome.yml'
+  pull_request:
+    paths:
+      - 'esphome/**'
+      - '.github/workflows/esphome.yml'
+
+jobs:
+  compile:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install ESPHome
+        run: pip install esphome==2026.6.5
+
+      - name: Create placeholder secrets
+        run: |
+          cat > esphome/secrets.yaml <<EOF
+          wifi_ssid: "ci"
+          wifi_password: "ci-password"
+          ota_password: "ci"
+          api_encryption_key: "$(openssl rand -base64 32)"
+          EOF
+
+      - name: Compile example configuration
+        run: esphome compile esphome/cgo600.yaml

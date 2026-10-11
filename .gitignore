@@ -8,3 +8,7 @@ cgo600.conf
 # PlatformIO
 firmware/.pio/
 firmware/.vscode/
+
+# ESPHome
+esphome/secrets.yaml
+esphome/.esphome/
