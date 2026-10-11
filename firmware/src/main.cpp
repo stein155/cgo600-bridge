@@ -15,13 +15,13 @@
 #include "reset_reason.h"
 #include "web_server.h"
 
-static const char* lastBleStatusPublished = nullptr;
 static portMUX_TYPE rideStateMux = portMUX_INITIALIZER_UNLOCKED;
 static volatile bool pendingRideState = false;
 static BikeState rideStateSnapshot;
 
 // Pending light command — set from MQTT callback (AsyncTCP task, Core 0),
 // consumed in loop() (main task, Core 1). Avoids calling BLE from wrong task.
+static portMUX_TYPE lightCmdMux = portMUX_INITIALIZER_UNLOCKED;
 static volatile bool pendingLightCmd = false;
 static volatile bool pendingLightOn  = false;
 
@@ -126,8 +126,10 @@ void setup() {
         // Calling bleClient.setLight() from AsyncTCP task (Core 0) races
         // with BLE operations on Core 1 → panic.
         mqttHA.setLightCommandCallback([](bool on) -> bool {
+            portENTER_CRITICAL(&lightCmdMux);
             pendingLightOn  = on;
             pendingLightCmd = true;
+            portEXIT_CRITICAL(&lightCmdMux);
             return true;
         });
         mqttHA.begin(config.mqtt_broker, config.mqtt_port,
@@ -159,8 +161,11 @@ void loop() {
 
     // Execute deferred light command from MQTT (must run on main task)
     if (pendingLightCmd) {
+        portENTER_CRITICAL(&lightCmdMux);
+        const bool lightOn = pendingLightOn;
         pendingLightCmd = false;
-        bleClient.setLight(pendingLightOn);
+        portEXIT_CRITICAL(&lightCmdMux);
+        bleClient.setLight(lightOn);
     }
 
     bool webLightOn = false;
@@ -168,10 +173,7 @@ void loop() {
         bleClient.setLight(webLightOn);
     }
 
-    const char* bleStatus = bleClient.getStatusStr();
-    if (bleStatus != lastBleStatusPublished) {
-        lastBleStatusPublished = bleStatus;
-        mqttHA.publishBleStatus(bleStatus);
-    }
-
+    // Deduplicated inside MqttHA; calling every loop also re-sends after an
+    // MQTT reconnect.
+    mqttHA.publishBleStatus(bleClient.getStatusStr());
 }

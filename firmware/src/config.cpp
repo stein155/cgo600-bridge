@@ -1,20 +1,9 @@
 #include "config.h"
 #include <ArduinoJson.h>
 #include "logger.h"
+#include "util.h"
 
 Config config;
-
-static void copyString(char* dest, size_t destSize, const char* src) {
-    if (!dest || destSize == 0) {
-        return;
-    }
-    if (!src) {
-        dest[0] = '\0';
-        return;
-    }
-    strncpy(dest, src, destSize - 1);
-    dest[destSize - 1] = '\0';
-}
 
 static float clampPollInterval(float value) {
     if (value < 0.5f) return 0.5f;

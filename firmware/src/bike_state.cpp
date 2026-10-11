@@ -17,7 +17,9 @@ static uint32_t intBE(const uint8_t* data, uint8_t len) {
 static void safeAscii(const uint8_t* data, uint8_t len, char* out, size_t outSize) {
     size_t j = 0;
     for (uint8_t i = 0; i < len && j < outSize - 1; i++) {
-        if (data[i] >= 32 && data[i] <= 126) {
+        // Printable ASCII only; quote and backslash are dropped so the value
+        // can be embedded in hand-built JSON without escaping.
+        if (data[i] >= 32 && data[i] <= 126 && data[i] != '"' && data[i] != '\\') {
             out[j++] = data[i];
         }
     }
@@ -30,16 +32,6 @@ static void safeHex(const uint8_t* data, uint8_t len, char* out, size_t outSize)
     for (uint8_t i = 0; i < len && j + 2 < outSize; i++) {
         out[j++] = HEX_DIGITS[(data[i] >> 4) & 0x0F];
         out[j++] = HEX_DIGITS[data[i] & 0x0F];
-    }
-    out[j] = '\0';
-}
-
-// Decode BCD-encoded password: skip first byte (mode indicator), decode rest as BCD digits
-static void decodeBcdPassword(const uint8_t* data, uint8_t len, char* out, size_t outSize) {
-    size_t j = 0;
-    for (uint8_t i = 1; i < len && j + 2 < outSize; i++) {
-        out[j++] = '0' + ((data[i] >> 4) & 0x0F);
-        out[j++] = '0' + (data[i] & 0x0F);
     }
     out[j] = '\0';
 }
