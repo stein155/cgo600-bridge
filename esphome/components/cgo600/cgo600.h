@@ -34,6 +34,7 @@ class CGO600Component : public esp32_ble_client::BLEClientBase {
 
     void set_device_name(const std::string &name) { this->device_name_ = name; }
     void set_poll_interval(uint32_t ms) { this->poll_interval_ms_ = ms; }
+    void set_pause_scan_while_connected(bool pause) { this->pause_scan_while_connected_ = pause; }
 
     void set_battery_sensor(sensor::Sensor *s) { this->battery_sensor_ = s; }
     void set_speed_sensor(sensor::Sensor *s) { this->speed_sensor_ = s; }
@@ -67,6 +68,7 @@ class CGO600Component : public esp32_ble_client::BLEClientBase {
 
     std::string device_name_{"CGO600"};
     uint32_t poll_interval_ms_{1000};
+    bool pause_scan_while_connected_{true};
 
     Phase phase_{Phase::IDLE};
     uint8_t handshake_step_{0};

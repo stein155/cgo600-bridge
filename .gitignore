@@ -14,3 +14,7 @@ firmware/.vscode/
 # ESPHome
 esphome/secrets.yaml
 esphome/.esphome/
+
+# Web installer build output
+site/
+esphome/.install-*.yaml

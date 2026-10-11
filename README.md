@@ -52,6 +52,15 @@ The bridge only sees the bike when it reconnects (typically on departure or arri
 
 ## Installation
 
+### Install from the browser
+
+The easiest way: open the **[web installer](https://stein155.github.io/cgo600-bridge/)** in Chrome or Edge on a desktop computer, connect the ESP32 over USB and click *Install*. You can choose between two variants:
+
+- **ESPHome** (recommended for Home Assistant): set up WiFi in the browser right after flashing. Home Assistant then discovers the bridge automatically, and it also works as a Bluetooth proxy.
+- **Standalone**: the firmware described in this README, with the web dashboard, ride history and MQTT. After flashing, set up WiFi through the `CGO600-Setup` hotspot.
+
+The installer is rebuilt from the latest release by `.github/workflows/installer.yml`.
+
 ### Pre-built firmware
 
 Download the four `.bin` files from the [latest release](../../releases/latest) and flash with [esptool](https://docs.espressif.com/projects/esptool/en/latest/):
@@ -160,6 +169,10 @@ switch:
 
 All keys are optional. A complete example is in [`esphome/cgo600.yaml`](esphome/cgo600.yaml); copy `esphome/secrets.yaml.example` to `esphome/secrets.yaml` to compile it locally. The component requires the `esp-idf` framework.
 
+The component uses one BLE connection slot. Alongside a `bluetooth_proxy`, keep the total within `esp32_ble: max_connections` (default 3), for example `connection_slots: 2` for the proxy. While the bike is connected the component pauses scanning, because scanning during the connection caused regular disconnects. A proxy therefore receives no advertisements during that time. Set `pause_scan_while_connected: false` if the proxy matters more than a stable bike connection.
+
+[`esphome/cgo600-install.yaml`](esphome/cgo600-install.yaml) is the ready-made configuration that the web installer flashes. It sets up WiFi through Improv and a fallback hotspot, enables the Bluetooth proxy, and supports adoption in the ESPHome dashboard.
+
 ## BLE protocol
 
 The CGO600 exposes a Nordic UART Service (NUS) over BLE. Commands are written to the RX characteristic; telemetry replies arrive as notifications on the TX characteristic. The protocol details below come from reverse engineering and may differ across bike/display firmware versions.
@@ -195,7 +208,12 @@ CRC16 is computed over all bytes from the start byte up to (but not including) t
 ```
 esphome/
   cgo600.yaml           Example ESPHome configuration
+  cgo600-install.yaml   Ready-made configuration flashed by the web installer
   components/cgo600/    ESPHome external component (BLE client, sensors, light switch)
+installer/
+  index.html            Web installer page (esp-web-tools), published to GitHub Pages
+  build_site.py         Assembles the page, manifests and firmware images
+  local_esphome_config.py  Points the install config at the local component for CI builds
 firmware/
   platformio.ini        Build configuration
   partitions.csv        Custom partition layout

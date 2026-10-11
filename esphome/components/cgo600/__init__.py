@@ -1,5 +1,5 @@
 import esphome.codegen as cg
-from esphome.components import esp32_ble_client, esp32_ble_tracker
+from esphome.components import esp32_ble, esp32_ble_client, esp32_ble_tracker
 import esphome.config_validation as cv
 from esphome.const import CONF_ID
 
@@ -10,11 +10,12 @@ CODEOWNERS = ["@stein155"]
 CONF_CGO600_ID = "cgo600_id"
 CONF_DEVICE_NAME = "device_name"
 CONF_POLL_INTERVAL = "poll_interval"
+CONF_PAUSE_SCAN_WHILE_CONNECTED = "pause_scan_while_connected"
 
 cgo600_ns = cg.esphome_ns.namespace("cgo600")
 CGO600Component = cgo600_ns.class_("CGO600Component", esp32_ble_client.BLEClientBase)
 
-CONFIG_SCHEMA = (
+CONFIG_SCHEMA = cv.All(
     cv.Schema(
         {
             cv.GenerateID(): cv.declare_id(CGO600Component),
@@ -25,10 +26,12 @@ CONFIG_SCHEMA = (
                     min=cv.TimePeriod(milliseconds=500), max=cv.TimePeriod(seconds=10)
                 ),
             ),
+            cv.Optional(CONF_PAUSE_SCAN_WHILE_CONNECTED, default=True): cv.boolean,
         }
     )
     .extend(esp32_ble_tracker.ESP_BLE_DEVICE_SCHEMA)
-    .extend(cv.COMPONENT_SCHEMA)
+    .extend(cv.COMPONENT_SCHEMA),
+    esp32_ble.consume_connection_slots(1, "cgo600"),
 )
 
 CGO600_CHILD_SCHEMA = cv.Schema(
@@ -44,3 +47,4 @@ async def to_code(config):
     await esp32_ble_tracker.register_client(var, config)
     cg.add(var.set_device_name(config[CONF_DEVICE_NAME]))
     cg.add(var.set_poll_interval(config[CONF_POLL_INTERVAL]))
+    cg.add(var.set_pause_scan_while_connected(config[CONF_PAUSE_SCAN_WHILE_CONNECTED]))

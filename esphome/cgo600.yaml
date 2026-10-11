@@ -52,6 +52,11 @@ esp32_ble_tracker:
     interval: 320ms
     window: 160ms
 
+# Also relay other Bluetooth devices near the bike shed to Home Assistant.
+bluetooth_proxy:
+  active: true
+  connection_slots: 2
+
 cgo600:
   id: bike
   device_name: CGO600

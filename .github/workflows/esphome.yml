@@ -5,10 +5,12 @@ on:
     branches: [main]
     paths:
       - 'esphome/**'
+      - 'installer/local_esphome_config.py'
       - '.github/workflows/esphome.yml'
   pull_request:
     paths:
       - 'esphome/**'
+      - 'installer/local_esphome_config.py'
       - '.github/workflows/esphome.yml'
 
 jobs:
@@ -36,3 +38,8 @@ jobs:
 
       - name: Compile example configuration
         run: esphome compile esphome/cgo600.yaml
+
+      - name: Compile web installer configuration
+        run: |
+          python3 installer/local_esphome_config.py
+          esphome compile esphome/.install-ci.yaml

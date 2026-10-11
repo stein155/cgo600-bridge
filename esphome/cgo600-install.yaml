@@ -1,0 +1,99 @@
+# Ready-made ESPHome configuration for the CGO600 Bridge.
+#
+# This is the firmware the web installer flashes. WiFi is set up from the
+# browser (Improv serial) or through the "CGO600 Bridge" fallback hotspot.
+# Home Assistant then discovers the device, and the ESPHome dashboard offers
+# to adopt it (dashboard_import), after which it can be customised freely.
+
+substitutions:
+  name: cgo600-bridge
+  friendly_name: CGO600 Bridge
+  # Set by the release workflow (esphome -s project_version X.Y.Z compile ...)
+  project_version: dev
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  # Several bridges on one network each get a unique hostname.
+  name_add_mac_suffix: true
+  project:
+    name: stein155.cgo600-bridge
+    version: ${project_version}
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+logger:
+
+api:
+
+ota:
+  - platform: esphome
+
+wifi:
+  ap:
+    ssid: CGO600 Bridge
+
+captive_portal:
+
+improv_serial:
+
+dashboard_import:
+  package_import_url: github://stein155/cgo600-bridge/esphome/cgo600-install.yaml@main
+  import_full_config: true
+
+external_components:
+  - source:
+      type: git
+      url: https://github.com/stein155/cgo600-bridge
+      ref: main
+      path: esphome/components
+    components: [cgo600]
+
+esp32_ble_tracker:
+  scan_parameters:
+    active: true
+    continuous: true
+    interval: 320ms
+    window: 160ms
+
+# Also relay other Bluetooth devices near the bike shed to Home Assistant.
+bluetooth_proxy:
+  active: true
+  connection_slots: 2
+
+cgo600:
+  device_name: CGO600
+
+sensor:
+  - platform: cgo600
+    battery:
+      name: Battery
+    speed:
+      name: Speed
+    max_speed:
+      name: Max speed
+    avg_speed:
+      name: Average speed
+    trip_distance:
+      name: Trip distance
+    trip_duration:
+      name: Trip duration
+    remaining_range:
+      name: Remaining range
+    range:
+      name: Total range
+
+text_sensor:
+  - platform: cgo600
+    serial_number:
+      name: Serial number
+    ble_status:
+      name: BLE status
+
+switch:
+  - platform: cgo600
+    light:
+      name: Light
