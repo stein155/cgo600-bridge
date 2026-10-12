@@ -12,6 +12,7 @@
 #include "esphome/core/automation.h"
 #include "esphome/core/component.h"
 #include "esphome/core/helpers.h"
+#include "esphome/core/preferences.h"
 #include "cgo600_protocol.h"
 #include "ride_log.h"
 
@@ -79,6 +80,8 @@ class CGO600Component : public esp32_ble_client::BLEClientBase {
     bool write_(const uint8_t *data, size_t len);
     void request_static_fields_();
     void reset_session_();
+    void restore_last_state_();
+    void save_last_state_();
     void pause_scanning_();
     void resume_scanning_();
     void publish_state_();
@@ -107,6 +110,16 @@ class CGO600Component : public esp32_ble_client::BLEClientBase {
     uint16_t max_rides_{20};
     uint32_t last_connected_at_{0};
     CallbackManager<void(float, uint32_t, int)> ride_callback_;
+    // Last known telemetry, kept in flash so the dashboard and Home Assistant
+    // show it after a disconnect or reboot instead of nothing.
+    struct LastState {
+        uint32_t magic;
+        uint32_t connected_at;
+        protocol::BikeState state;
+    };
+    ESPPreferenceObject last_state_pref_;
+    bool last_state_dirty_{false};
+    uint32_t last_state_saved_ms_{0};
     protocol::FrameParser parser_;
     const char *last_ble_status_{nullptr};
 

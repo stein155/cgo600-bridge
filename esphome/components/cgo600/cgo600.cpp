@@ -27,6 +27,9 @@ static constexpr uint16_t CONN_LATENCY = 0;
 static constexpr uint16_t CONN_SUPERVISION_TIMEOUT = 1000;  // 10 s
 // Anything before 2020 means the clock has not been set by a time source yet.
 static constexpr time_t MIN_VALID_EPOCH = 1577836800;
+// Bump when protocol::BikeState changes layout; older data is then ignored.
+static constexpr uint32_t LAST_STATE_MAGIC = 0x43475301;
+static constexpr uint32_t LAST_STATE_SAVE_INTERVAL_MS = 5 * 60 * 1000;
 
 static uint32_t epoch_now() {
     const time_t now = ::time(nullptr);
@@ -55,6 +58,7 @@ static bool contains_ignore_case(const std::string &haystack, const std::string 
 void CGO600Component::setup() {
     BLEClientBase::setup();
     this->ride_log_.setup(this->max_rides_);
+    this->restore_last_state_();
     this->update_ble_status_();
 }
 
@@ -158,8 +162,10 @@ bool CGO600Component::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_i
                 changed = this->parser_.feed(this->state_, param->notify.value, param->notify.value_len, saw_trip,
                                              this->bad_crc_count_);
             }
-            if (changed)
+            if (changed) {
+                this->last_state_dirty_ = true;
                 this->publish_state_();
+            }
             // A frame carrying the trip counters is a confirmed current reading:
             // its receive time anchors the ride window.
             RideRecord ride;
@@ -214,6 +220,8 @@ void CGO600Component::loop() {
             if (!this->write_(protocol::READ_DATA_CMD))
                 ESP_LOGW(TAG, "Poll write failed");
         }
+        if (this->last_state_dirty_ && now - this->last_state_saved_ms_ >= LAST_STATE_SAVE_INTERVAL_MS)
+            this->save_last_state_();
         // Serial number sometimes arrives later than the bootstrap; keep asking.
         if (now - this->last_static_request_ >= STATIC_REQUEST_INTERVAL_MS)
             this->request_static_fields_();
@@ -250,8 +258,10 @@ void CGO600Component::run_handshake_step_(uint32_t now) {
     this->last_poll_ = now;
     ESP_LOGI(TAG, "Handshake complete, polling every %u ms", (unsigned) this->poll_interval_ms_);
     const uint32_t connected_at = epoch_now();
-    if (connected_at != 0)
+    if (connected_at != 0) {
         this->last_connected_at_ = connected_at;
+        this->last_state_dirty_ = true;
+    }
     this->update_ble_status_();
 }
 
@@ -323,11 +333,56 @@ void CGO600Component::resume_scanning_() {
 
 void CGO600Component::reset_session_() {
     this->resume_scanning_();
+    if (this->phase_ == Phase::POLLING) {
+        // Keep the last readings, but a speed from before the bike left is no
+        // longer current.
+        {
+            LockGuard guard(this->state_mutex_);
+            if (this->state_.speed_kmh > 0)
+                this->state_.speed_kmh = 0;
+        }
+        this->publish_state_();
+        this->last_state_dirty_ = true;
+        this->save_last_state_();
+        global_preferences->sync();  // disconnects are rare; do not wait for the periodic flush
+    }
     this->phase_ = Phase::IDLE;
     this->handshake_step_ = 0;
     this->tx_handle_ = 0;
     this->rx_handle_ = 0;
     this->parser_.reset();
+}
+
+void CGO600Component::restore_last_state_() {
+    this->last_state_pref_ = global_preferences->make_preference<LastState>(fnv1_hash("cgo600_last_state"));
+    LastState saved{};
+    if (!this->last_state_pref_.load(&saved) || saved.magic != LAST_STATE_MAGIC)
+        return;
+    {
+        LockGuard guard(this->state_mutex_);
+        this->state_ = saved.state;
+    }
+    this->last_connected_at_ = saved.connected_at;
+    ESP_LOGI(TAG, "Restored last known state (battery %d%%)", saved.state.battery);
+    this->publish_state_();
+}
+
+void CGO600Component::save_last_state_() {
+    if (!this->last_state_dirty_)
+        return;
+    LastState data{};
+    data.magic = LAST_STATE_MAGIC;
+    data.connected_at = this->last_connected_at_;
+    {
+        LockGuard guard(this->state_mutex_);
+        data.state = this->state_;
+    }
+    if (this->last_state_pref_.save(&data)) {
+        this->last_state_dirty_ = false;
+        this->last_state_saved_ms_ = millis();
+    } else {
+        ESP_LOGW(TAG, "Saving last state failed");
+    }
 }
 
 static void publish_if_changed(sensor::Sensor *sensor, float value) {
