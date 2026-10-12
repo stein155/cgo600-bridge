@@ -1,0 +1,132 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CGO600 Bridge Installer</title>
+    <meta name="description" content="Install the CGO600 Bridge firmware on an ESP32 straight from your browser.">
+    <meta name="theme-color" content="#070b16">
+    <script type="module" src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
+    <style>
+        :root {
+            --bg: #f4f6fb;
+            --surface: #ffffff;
+            --border: #dfe4ee;
+            --text: #0d1424;
+            --muted: #5b6579;
+            --accent: #1a7fd6;
+            --accent-on: #ffffff;
+            --warn-bg: #fff5e0;
+            --warn-text: #7a4b00;
+        }
+        @media (prefers-color-scheme: dark) {
+            :root {
+                --bg: #070b16;
+                --surface: #0f1729;
+                --border: #1f2a42;
+                --text: #e8eefb;
+                --muted: #93a0b8;
+                --accent: #5fb4ff;
+                --accent-on: #06091a;
+                --warn-bg: #2a2010;
+                --warn-text: #f3c77a;
+            }
+        }
+        * { box-sizing: border-box; }
+        body {
+            margin: 0;
+            background: var(--bg);
+            color: var(--text);
+            font: 16px/1.55 system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+        }
+        main { max-width: 860px; margin: 0 auto; padding: 48px 16px 64px; }
+        h1 { font-size: 2rem; margin: 0 0 8px; letter-spacing: -0.02em; }
+        h2 { font-size: 1.25rem; margin: 0 0 8px; }
+        h3 { font-size: 1rem; margin: 32px 0 8px; }
+        p { margin: 0 0 12px; }
+        a { color: var(--accent); }
+        .lead { color: var(--muted); font-size: 1.1rem; max-width: 640px; }
+        .requirements { margin: 24px 0 32px; padding-left: 20px; color: var(--muted); }
+        .card {
+            background: var(--surface);
+            border: 1px solid var(--border);
+            border-radius: 16px;
+            padding: 24px;
+            display: flex;
+            flex-direction: column;
+        }
+        .card ul { padding-left: 20px; margin: 0 0 20px; color: var(--muted); flex: 1; }
+        .card li { margin-bottom: 4px; }
+        button.install {
+            width: 100%;
+            max-width: 360px;
+            padding: 12px 16px;
+            border: 0;
+            border-radius: 10px;
+            background: var(--accent);
+            color: var(--accent-on);
+            font: inherit;
+            font-weight: 600;
+            cursor: pointer;
+        }
+        .notice {
+            background: var(--warn-bg);
+            color: var(--warn-text);
+            border-radius: 10px;
+            padding: 12px 16px;
+            font-size: 0.95rem;
+        }
+        ol { padding-left: 20px; color: var(--muted); }
+        ol li { margin-bottom: 6px; }
+        footer { margin-top: 48px; color: var(--muted); font-size: 0.9rem; }
+    </style>
+</head>
+<body>
+<main>
+    <h1>CGO600 Bridge Installer</h1>
+    <p class="lead">
+        Turn an ESP32 into a bridge that reads your Tenways CGO600 over Bluetooth and brings
+        battery, range, trips and the light into Home Assistant. No tools to install, just your browser.
+    </p>
+
+    <ul class="requirements">
+        <li>An ESP32 board; the ESP32-WROOM-32U with an external antenna gives the best range</li>
+        <li>A USB data cable (not a charge-only cable)</li>
+        <li>Chrome or Edge on a desktop computer (Web Serial)</li>
+        <li>Upgrading from the old standalone firmware? Export your rides first via <em>http://&lt;bridge&gt;/api/rides</em>, then use <em>Import rides</em> in the new dashboard.</li>
+    </ul>
+
+    <section class="card">
+        <h2>What you get</h2>
+        <ul>
+            <li>A dashboard on the bridge itself: live battery, range and light, plus your ride history</li>
+            <li>Battery, range, trips, light and more in Home Assistant, discovered automatically</li>
+            <li>Rides inferred from departure and arrival, also sent to Home Assistant as events</li>
+            <li>Built on ESPHome: updates over WiFi, and adopt it in the ESPHome add-on to customise</li>
+        </ul>
+        <esp-web-install-button manifest="manifest.json">
+            <button class="install" slot="activate">Install CGO600 Bridge</button>
+            <span slot="unsupported" class="notice">Your browser does not support Web Serial. Use Chrome or Edge on a desktop computer.</span>
+            <span slot="not-allowed" class="notice">Web Serial needs a secure (https) connection.</span>
+        </esp-web-install-button>
+    </section>
+
+    <h3>After installing</h3>
+    <ol>
+        <li>Enter your WiFi details when the installer asks for them. If you skip this step, connect to the <em>CGO600 Bridge</em> hotspot instead.</li>
+        <li>Click <em>Visit device</em> to open the bridge dashboard, and bookmark it. The address is also shown under <em>Settings → System</em>.</li>
+        <li>Add the bridge in Home Assistant under <em>Settings → Devices &amp; services</em>; it is usually discovered automatically.</li>
+        <li>Switch the bike on near the bridge. It connects automatically; no pairing or MAC address is needed.</li>
+    </ol>
+
+    <p class="notice">A new install erases the ESP32. Later updates are installed over WiFi, and the ride history is kept.</p>
+
+    <footer>
+        <p>
+            Unofficial community project, not affiliated with or endorsed by Tenways.
+            Source code and documentation on <a href="https://github.com/stein155/cgo600-bridge">GitHub</a>.
+        </p>
+    </footer>
+</main>
+</body>
+</html>

@@ -1,0 +1,71 @@
+name: Web Installer
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install ESPHome
+        run: pip install esphome==2026.6.5
+
+      - name: Determine version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "release" ]; then
+            echo "version=${{ github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
+          else
+            echo "version=dev-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Build firmware
+        run: |
+          python3 installer/local_esphome_config.py
+          esphome -s project_version "${{ steps.version.outputs.version }}" compile esphome/.install-ci.yaml
+
+      - name: Assemble installer site
+        run: python3 installer/build_site.py --version "${{ steps.version.outputs.version }}" --out site
+
+      - name: Attach firmware to the release
+        if: github.event_name == 'release'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          BUILD=esphome/.esphome/build/cgo600-bridge/.pioenvs/cgo600-bridge
+          cp "$BUILD/firmware.factory.bin" cgo600-bridge-factory.bin
+          cp "$BUILD/firmware.ota.bin" cgo600-bridge-ota.bin
+          sha256sum cgo600-bridge-*.bin > SHA256SUMS
+          gh release upload "${{ github.event.release.tag_name }}" cgo600-bridge-*.bin SHA256SUMS --clobber
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
