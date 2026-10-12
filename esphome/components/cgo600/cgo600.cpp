@@ -306,7 +306,7 @@ bool CGO600Component::set_light(bool on) {
 // supervision timeouts, so scan only while the bike is not connected.
 void CGO600Component::pause_scanning_() {
     auto *tracker = espbt::global_esp32_ble_tracker;
-    if (!this->pause_scan_while_connected_ || tracker == nullptr || this->scan_paused_)
+    if (tracker == nullptr || this->scan_paused_)
         return;
     this->scan_paused_ = true;
     tracker->stop_scan();

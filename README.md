@@ -22,7 +22,6 @@ For this project I reverse engineered the bike's Bluetooth protocol and built an
 - **Web dashboard** on the bridge: battery, range, light, lifetime totals and ride history
 - **Ride history** inferred from check-ins, stored on the ESP32 and sent to Home Assistant as events
 - **Light control** from Home Assistant and the dashboard
-- **Bluetooth proxy** for other BLE devices near the bike
 - **No pairing**: the bike is found by name or by its Bluetooth service, no MAC address needed
 
 ## Installation
@@ -128,9 +127,7 @@ The bridge only sees the bike when it connects, typically on departure or arriva
 
 ## Bluetooth notes
 
-The component uses one BLE connection slot. Alongside a `bluetooth_proxy`, keep the total within `esp32_ble: max_connections` (default 3), for example `connection_slots: 2` for the proxy.
-
-While the bike is connected, the component pauses scanning and requests a relaxed connection interval with a 10 s supervision timeout. Scanning during the connection caused regular disconnects. As a result, a proxy receives no advertisements while the bike is connected. Set `pause_scan_while_connected: false` if the proxy matters more than a stable bike connection.
+The component uses one BLE connection slot, which counts towards `esp32_ble: max_connections`. While the bike is connected, it pauses scanning and requests a relaxed connection interval with a 10 s supervision timeout, because scanning during the connection caused regular disconnects.
 
 ## Migrating from the standalone firmware
 

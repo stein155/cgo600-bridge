@@ -36,7 +36,6 @@ class CGO600Component : public esp32_ble_client::BLEClientBase {
 
     void set_device_name(const std::string &name) { this->device_name_ = name; }
     void set_poll_interval(uint32_t ms) { this->poll_interval_ms_ = ms; }
-    void set_pause_scan_while_connected(bool pause) { this->pause_scan_while_connected_ = pause; }
     void set_max_rides(uint16_t max_rides) { this->max_rides_ = max_rides; }
     void add_on_ride_callback(std::function<void(float, uint32_t, int)> &&callback) {
         this->ride_callback_.add(std::move(callback));
@@ -87,7 +86,6 @@ class CGO600Component : public esp32_ble_client::BLEClientBase {
 
     std::string device_name_{"CGO600"};
     uint32_t poll_interval_ms_{1000};
-    bool pause_scan_while_connected_{true};
 
     Phase phase_{Phase::IDLE};
     uint8_t handshake_step_{0};

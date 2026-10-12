@@ -23,7 +23,6 @@ CODEOWNERS = ["@stein155"]
 CONF_CGO600_ID = "cgo600_id"
 CONF_DEVICE_NAME = "device_name"
 CONF_POLL_INTERVAL = "poll_interval"
-CONF_PAUSE_SCAN_WHILE_CONNECTED = "pause_scan_while_connected"
 CONF_MAX_RIDES = "max_rides"
 CONF_WEB_UI = "web_ui"
 CONF_WEB_UI_ID = "web_ui_id"
@@ -62,7 +61,6 @@ CONFIG_SCHEMA = cv.All(
                     min=cv.TimePeriod(milliseconds=500), max=cv.TimePeriod(seconds=10)
                 ),
             ),
-            cv.Optional(CONF_PAUSE_SCAN_WHILE_CONNECTED, default=True): cv.boolean,
             cv.Optional(CONF_MAX_RIDES, default=20): cv.int_range(min=1, max=50),
             cv.Optional(CONF_WEB_UI, default=True): cv.boolean,
             cv.Optional(CONF_ON_RIDE): automation.validate_automation(
@@ -107,7 +105,6 @@ async def to_code(config):
     await esp32_ble_tracker.register_client(var, config)
     cg.add(var.set_device_name(config[CONF_DEVICE_NAME]))
     cg.add(var.set_poll_interval(config[CONF_POLL_INTERVAL]))
-    cg.add(var.set_pause_scan_while_connected(config[CONF_PAUSE_SCAN_WHILE_CONNECTED]))
     cg.add(var.set_max_rides(config[CONF_MAX_RIDES]))
 
     for conf in config.get(CONF_ON_RIDE, []):
