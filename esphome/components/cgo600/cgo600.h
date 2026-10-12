@@ -93,6 +93,7 @@ class CGO600Component : public esp32_ble_client::BLEClientBase {
     Phase phase_{Phase::IDLE};
     uint8_t handshake_step_{0};
     uint32_t next_step_at_{0};
+    uint32_t connect_started_ms_{0};
     uint32_t last_poll_{0};
     uint32_t last_static_request_{0};
     uint32_t bad_crc_count_{0};

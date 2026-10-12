@@ -18,11 +18,16 @@ static constexpr uint32_t HANDSHAKE_STEP_MS = 120;
 static constexpr uint32_t STATIC_REQUEST_INTERVAL_MS = 15000;
 static constexpr size_t MAX_WRITE_LEN = 32;
 static constexpr uint32_t LIGHT_CONFIRM_WINDOW_MS = 2000;
-// Connection parameters requested from the bike (units: 1.25 ms, 10 ms). A
-// relaxed interval leaves airtime for WiFi; the 10 s supervision timeout rides
-// out short radio hiccups that otherwise drop the link with reason 0x08.
-static constexpr uint16_t CONN_MIN_INTERVAL = 0x18;  // 30 ms
-static constexpr uint16_t CONN_MAX_INTERVAL = 0x28;  // 50 ms
+// Connection parameters (units: 1.25 ms, 10 ms). Connect with a short interval
+// so service discovery is quick: the bike is often switched off seconds after
+// arriving, and a 50 ms interval stretched discovery to over 10 s. Once the
+// services are known, switch to a relaxed interval that leaves airtime for
+// WiFi. The 10 s supervision timeout rides out short radio hiccups that
+// otherwise drop the link with reason 0x08.
+static constexpr uint16_t FAST_MIN_INTERVAL = 0x06;  // 7.5 ms
+static constexpr uint16_t FAST_MAX_INTERVAL = 0x10;  // 20 ms
+static constexpr uint16_t RELAXED_MIN_INTERVAL = 0x18;  // 30 ms
+static constexpr uint16_t RELAXED_MAX_INTERVAL = 0x28;  // 50 ms
 static constexpr uint16_t CONN_LATENCY = 0;
 static constexpr uint16_t CONN_SUPERVISION_TIMEOUT = 1000;  // 10 s
 // Anything before 2020 means the clock has not been set by a time source yet.
@@ -113,7 +118,8 @@ void CGO600Component::set_state(espbt::ClientState state) {
 }
 
 void CGO600Component::connect() {
-    this->set_conn_params_(CONN_MIN_INTERVAL, CONN_MAX_INTERVAL, CONN_LATENCY, CONN_SUPERVISION_TIMEOUT, "cgo600");
+    this->connect_started_ms_ = millis();
+    this->set_conn_params_(FAST_MIN_INTERVAL, FAST_MAX_INTERVAL, CONN_LATENCY, CONN_SUPERVISION_TIMEOUT, "fast");
     BLEClientBase::connect();
 }
 
@@ -163,6 +169,10 @@ bool CGO600Component::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_i
                                              this->bad_crc_count_);
             }
             if (changed) {
+                if (this->connect_started_ms_ != 0) {
+                    ESP_LOGI(TAG, "First data %u ms after connecting", (unsigned) (millis() - this->connect_started_ms_));
+                    this->connect_started_ms_ = 0;
+                }
                 this->last_state_dirty_ = true;
                 this->publish_state_();
             }
@@ -200,6 +210,8 @@ void CGO600Component::on_services_ready_() {
     }
     this->tx_handle_ = tx->handle;
     this->rx_handle_ = rx->handle;
+    this->update_conn_params_(RELAXED_MIN_INTERVAL, RELAXED_MAX_INTERVAL, CONN_LATENCY, CONN_SUPERVISION_TIMEOUT,
+                              "relaxed");
 
     const esp_err_t err = esp_ble_gattc_register_for_notify(this->gattc_if_, this->remote_bda_, this->tx_handle_);
     if (err != ESP_OK) {
