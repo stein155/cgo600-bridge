@@ -10,7 +10,6 @@ CODEOWNERS = ["@stein155"]
 CONF_CGO600_ID = "cgo600_id"
 CONF_DEVICE_NAME = "device_name"
 CONF_POLL_INTERVAL = "poll_interval"
-CONF_PAUSE_SCAN_WHILE_CONNECTED = "pause_scan_while_connected"
 
 cgo600_ns = cg.esphome_ns.namespace("cgo600")
 CGO600Component = cgo600_ns.class_("CGO600Component", esp32_ble_client.BLEClientBase)
@@ -26,7 +25,6 @@ CONFIG_SCHEMA = cv.All(
                     min=cv.TimePeriod(milliseconds=500), max=cv.TimePeriod(seconds=10)
                 ),
             ),
-            cv.Optional(CONF_PAUSE_SCAN_WHILE_CONNECTED, default=True): cv.boolean,
         }
     )
     .extend(esp32_ble_tracker.ESP_BLE_DEVICE_SCHEMA)
@@ -47,4 +45,3 @@ async def to_code(config):
     await esp32_ble_tracker.register_client(var, config)
     cg.add(var.set_device_name(config[CONF_DEVICE_NAME]))
     cg.add(var.set_poll_interval(config[CONF_POLL_INTERVAL]))
-    cg.add(var.set_pause_scan_while_connected(config[CONF_PAUSE_SCAN_WHILE_CONNECTED]))
