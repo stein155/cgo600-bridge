@@ -83,8 +83,8 @@ const I18N = {
         theme_light: 'Light',
         theme_dark: 'Dark',
 
-        bt_name: 'Bluetooth name',
-        bt_name_hint: 'What the bridge looks for. Default: CGO600.',
+        bt_name: 'Bluetooth names',
+        bt_name_hint: 'What the bridge looks for. Default: CGO600, CGO800.',
         poll_interval: 'Poll interval',
         poll_interval_hint: 'How often the bridge wakes the bike. Lower drains the bike faster.',
         seconds: 'seconds',
@@ -200,8 +200,8 @@ const I18N = {
         theme_light: 'Licht',
         theme_dark: 'Donker',
 
-        bt_name: 'Bluetooth‑naam',
-        bt_name_hint: 'Waar de bridge naar zoekt. Standaard: CGO600.',
+        bt_name: 'Bluetooth‑namen',
+        bt_name_hint: 'Waar de bridge naar zoekt. Standaard: CGO600, CGO800.',
         poll_interval: 'Poll‑interval',
         poll_interval_hint: 'Hoe vaak de bridge de fiets aanspreekt. Lager = sneller leeg.',
         seconds: 'seconden',
@@ -241,14 +241,14 @@ const I18N = {
 
 (function () {
     function detectLanguage() {
-        const saved = localStorage.getItem('cgo600_language');
+        const saved = localStorage.getItem('cgo_language');
         if (saved && I18N_LANGS.indexOf(saved) >= 0) return saved;
         const nav = (navigator.language || 'en').toLowerCase();
         for (const l of I18N_LANGS) if (nav.indexOf(l) === 0) return l;
         return 'en';
     }
     function detectTheme() {
-        const saved = localStorage.getItem('cgo600_theme');
+        const saved = localStorage.getItem('cgo_theme');
         if (saved && ['system', 'light', 'dark'].indexOf(saved) >= 0) return saved;
         return 'system';
     }
@@ -289,14 +289,14 @@ const I18N = {
         setLanguage(lang) {
             if (I18N_LANGS.indexOf(lang) < 0) return;
             state.language = lang;
-            localStorage.setItem('cgo600_language', lang);
+            localStorage.setItem('cgo_language', lang);
             document.documentElement.setAttribute('lang', lang);
             window.dispatchEvent(new CustomEvent('languagechange'));
         },
         setThemePreference(pref) {
             if (['system', 'light', 'dark'].indexOf(pref) < 0) return;
             state.theme = pref;
-            localStorage.setItem('cgo600_theme', pref);
+            localStorage.setItem('cgo_theme', pref);
             applyTheme(pref);
             window.dispatchEvent(new CustomEvent('themechange'));
         },

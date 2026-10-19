@@ -8,7 +8,7 @@
 #         type: git
 #         url: https://github.com/stein155/cgo600-bridge
 #         path: esphome/components
-#       components: [cgo600]
+#       components: [cgo]
 
 esphome:
   name: cgo600
@@ -46,7 +46,7 @@ external_components:
   - source:
       type: local
       path: components
-    components: [cgo600]
+    components: [cgo]
 
 esp32_ble_tracker:
   scan_parameters:
@@ -57,22 +57,22 @@ esp32_ble_tracker:
     interval: 320ms
     window: 160ms
 
-cgo600:
+cgo:
   id: bike
-  device_name: CGO
+  device_names: [CGO600, CGO800]
   poll_interval: 1s
   max_rides: 50
   # Every inferred ride is also sent to Home Assistant as an event.
   on_ride:
     - homeassistant.event:
-        event: esphome.cgo600_ride
+        event: esphome.cgo_ride
         data:
           distance_km: !lambda 'return str_sprintf("%.1f", distance_km);'
           duration_s: !lambda 'return to_string(duration_s);'
           battery_used: !lambda 'return to_string(battery_used);'
 
 sensor:
-  - platform: cgo600
+  - platform: cgo
     battery:
       name: Battery
     speed:
@@ -91,13 +91,13 @@ sensor:
       name: Total range
 
 text_sensor:
-  - platform: cgo600
+  - platform: cgo
     serial_number:
       name: Serial number
     ble_status:
       name: BLE status
 
 switch:
-  - platform: cgo600
+  - platform: cgo
     light:
       name: Light

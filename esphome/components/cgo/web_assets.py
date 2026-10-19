@@ -6,7 +6,7 @@
 
 Used by the component's code generation; run it directly to inspect the
 bundle sizes:
-    python3 esphome/components/cgo600/web_assets.py
+    python3 esphome/components/cgo/web_assets.py
 """
 
 import gzip
@@ -31,9 +31,9 @@ JS_ORDER = [
     "main.js",
 ]
 
-JS_HEADER = "// CGO600 Bridge web UI. Generated from esphome/components/cgo600/web/js/, do not edit.\n"
+JS_HEADER = "// CGO600 Bridge web UI. Generated from esphome/components/cgo/web/js/, do not edit.\n"
 CSS_HEADER = (
-    "/* CGO600 Bridge web UI styles. Generated from esphome/components/cgo600/web/css/, do not edit.\n"
+    "/* CGO600 Bridge web UI styles. Generated from esphome/components/cgo/web/css/, do not edit.\n"
     "   Tokens mirror the design prototype (test-t/project/theme.js). */\n"
 )
 

@@ -6,7 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace esphome::cgo600::protocol {
+namespace esphome::cgo::protocol {
 
 static constexpr uint8_t FRAME_START = 0x52;
 static constexpr uint8_t FRAME_END = 0x45;
@@ -121,4 +121,4 @@ class FrameParser {
 
 }  // namespace km
 
-}  // namespace esphome::cgo600::protocol
+}  // namespace esphome::cgo::protocol

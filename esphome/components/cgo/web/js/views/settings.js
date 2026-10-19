@@ -40,7 +40,7 @@ function renderSettings() {
                 sectionLabel(T.t('sec_bike'), 'i-bike'),
                 card({}, [
                     field(T.t('bt_name'), T.t('yaml_hint'),
-                        textInput({ value: c.device_name || 'CGO600', readonly: true })),
+                        textInput({ value: c.device_name || 'CGO600, CGO800', readonly: true })),
                     field(T.t('poll_interval'), T.t('poll_interval_hint'),
                         textInput({ value: c.poll_interval != null ? c.poll_interval : 1, readonly: true, suffix: T.t('seconds') })),
                     field(T.t('bike_id'), T.t('bike_id_hint'),

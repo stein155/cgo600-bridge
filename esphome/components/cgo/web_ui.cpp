@@ -18,9 +18,9 @@
 #include "esphome/components/captive_portal/captive_portal.h"
 #endif
 
-namespace esphome::cgo600 {
+namespace esphome::cgo {
 
-static const char *const TAG = "cgo600.web";
+static const char *const TAG = "cgo.web";
 static const char *const JSON_TYPE = "application/json";
 // ESPHome's ESP-IDF server only emits 200, 404 and 409; any other status code
 // goes out as 500. Invalid requests therefore answer 409.
@@ -28,20 +28,20 @@ static constexpr int HTTP_OK = 200;
 static constexpr int HTTP_NOT_FOUND = 404;
 static constexpr int HTTP_INVALID = 409;
 
-void CGO600WebUI::setup() {
+void CGOWebUI::setup() {
     this->base_->init();
     this->base_->add_handler(this);
 }
 
-void CGO600WebUI::dump_config() {
+void CGOWebUI::dump_config() {
     size_t total = 0;
     for (const auto &asset : this->assets_)
         total += asset.size;
-    ESP_LOGCONFIG(TAG, "CGO600 web UI:");
+    ESP_LOGCONFIG(TAG, "CGO web UI:");
     ESP_LOGCONFIG(TAG, "  Assets: %u (%u bytes gzipped)", (unsigned) this->assets_.size(), (unsigned) total);
 }
 
-const CGO600WebUI::Asset *CGO600WebUI::find_asset_(const StringRef &path) const {
+const CGOWebUI::Asset *CGOWebUI::find_asset_(const StringRef &path) const {
     const StringRef lookup = path == "/" ? StringRef("/index.html") : path;
     for (const auto &asset : this->assets_) {
         if (lookup == asset.path)
@@ -50,7 +50,7 @@ const CGO600WebUI::Asset *CGO600WebUI::find_asset_(const StringRef &path) const 
     return nullptr;
 }
 
-bool CGO600WebUI::canHandle(AsyncWebServerRequest *request) const {
+bool CGOWebUI::canHandle(AsyncWebServerRequest *request) const {
 #ifdef USE_CAPTIVE_PORTAL
     // While the WiFi setup hotspot is up, the captive portal owns every page.
     if (captive_portal::global_captive_portal != nullptr && captive_portal::global_captive_portal->is_active())
@@ -65,13 +65,13 @@ bool CGO600WebUI::canHandle(AsyncWebServerRequest *request) const {
     return (url.size() > 5 && strncmp(url.c_str(), "/api/", 5) == 0) || this->find_asset_(url) != nullptr;
 }
 
-void CGO600WebUI::send_json_(AsyncWebServerRequest *request, int code, const std::string &json) {
+void CGOWebUI::send_json_(AsyncWebServerRequest *request, int code, const std::string &json) {
     auto *response = request->beginResponse(code, JSON_TYPE, json);
     response->addHeader("Cache-Control", "no-store");
     request->send(response);
 }
 
-void CGO600WebUI::handleRequest(AsyncWebServerRequest *request) {
+void CGOWebUI::handleRequest(AsyncWebServerRequest *request) {
     char url_buf[AsyncWebServerRequest::URL_BUF_SIZE];
     const StringRef url = request->url_to(url_buf);
 
@@ -100,11 +100,11 @@ void CGO600WebUI::handleRequest(AsyncWebServerRequest *request) {
             return;
         }
         const bool on = request->arg("on") == "1" || request->arg("on") == "true";
-        CGO600Component *bike = this->bike_;
+        CGOComponent *bike = this->bike_;
         this->defer([bike, on]() { bike->set_light(on); });
         this->send_json_(request, HTTP_OK, on ? "{\"ok\":true,\"light\":\"on\"}" : "{\"ok\":true,\"light\":\"off\"}");
     } else if (url == "/api/rides/clear") {
-        CGO600Component *bike = this->bike_;
+        CGOComponent *bike = this->bike_;
         this->defer([bike]() { bike->rides().clear(); });
         this->send_json_(request, HTTP_OK, "{\"ok\":true}");
     } else if (url == "/api/rides/import") {
@@ -117,7 +117,7 @@ void CGO600WebUI::handleRequest(AsyncWebServerRequest *request) {
     }
 }
 
-void CGO600WebUI::handle_state_(AsyncWebServerRequest *request) {
+void CGOWebUI::handle_state_(AsyncWebServerRequest *request) {
     const protocol::BikeState s = this->bike_->bike_state();
     std::string json = "{";
     char buf[96];
@@ -162,7 +162,7 @@ void CGO600WebUI::handle_state_(AsyncWebServerRequest *request) {
     this->send_json_(request, HTTP_OK, json);
 }
 
-void CGO600WebUI::handle_config_(AsyncWebServerRequest *request) {
+void CGOWebUI::handle_config_(AsyncWebServerRequest *request) {
     char ip[network::IP_ADDRESS_BUFFER_SIZE] = "";
     for (const auto &addr : network::get_ip_addresses()) {
         if (addr.is_set() && addr.is_ip4()) {
@@ -183,7 +183,7 @@ void CGO600WebUI::handle_config_(AsyncWebServerRequest *request) {
 // One ride per request, as query parameters: start, end (epoch seconds),
 // distance (km), duration (s) and optionally battery_start, battery_end,
 // avg and max (km/h). Small requests stay within the server's header limits.
-void CGO600WebUI::handle_import_(AsyncWebServerRequest *request) {
+void CGOWebUI::handle_import_(AsyncWebServerRequest *request) {
     if (!request->hasArg("start") || !request->hasArg("end") || !request->hasArg("distance") ||
         !request->hasArg("duration")) {
         this->send_json_(request, HTTP_INVALID, "{\"error\":\"missing ride fields\"}");
@@ -208,11 +208,11 @@ void CGO600WebUI::handle_import_(AsyncWebServerRequest *request) {
     ride.avg_speed_x10 = avg >= 0 ? (int16_t) (avg * 10 + 0.5f) : -1;
     ride.max_speed_x10 = max >= 0 ? (int16_t) (max * 10 + 0.5f) : -1;
 
-    CGO600Component *bike = this->bike_;
+    CGOComponent *bike = this->bike_;
     this->defer([bike, ride]() { bike->rides().import_ride(ride); });
     this->send_json_(request, HTTP_OK, "{\"ok\":true}");
 }
 
-}  // namespace esphome::cgo600
+}  // namespace esphome::cgo
 
 #endif  // USE_ESP32

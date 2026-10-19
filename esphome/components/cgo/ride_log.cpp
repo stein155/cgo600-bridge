@@ -8,9 +8,9 @@
 #include "esphome/core/helpers.h"
 #include "esphome/core/log.h"
 
-namespace esphome::cgo600 {
+namespace esphome::cgo {
 
-static const char *const TAG = "cgo600.rides";
+static const char *const TAG = "cgo.rides";
 
 // Bump when the Store layout changes; older data is then discarded.
 static constexpr uint32_t STORE_MAGIC = 0x43473601;
@@ -22,7 +22,7 @@ static constexpr uint32_t IDLE_SAVE_INTERVAL_MS = 5 * 60 * 1000;
 
 void RideLog::setup(size_t max_rides) {
     this->max_rides_ = std::min(std::max<size_t>(max_rides, 1), MAX_RIDES_CAP);
-    this->pref_ = global_preferences->make_preference<Store>(fnv1_hash("cgo600_rides"));
+    this->pref_ = global_preferences->make_preference<Store>(fnv1_hash("cgo_rides"));
     if (!this->pref_.load(&this->store_) || this->store_.magic != STORE_MAGIC) {
         this->store_ = Store();
         this->store_.magic = STORE_MAGIC;
@@ -193,4 +193,4 @@ std::string RideLog::to_json() const {
     return json;
 }
 
-}  // namespace esphome::cgo600
+}  // namespace esphome::cgo

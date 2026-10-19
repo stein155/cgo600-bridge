@@ -3,6 +3,7 @@
 #ifdef USE_ESP32
 
 #include <string>
+#include <vector>
 
 #include "esphome/components/esp32_ble_client/ble_client_base.h"
 #include "esphome/components/esp32_ble_tracker/esp32_ble_tracker.h"
@@ -13,19 +14,19 @@
 #include "esphome/core/component.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/preferences.h"
-#include "cgo600_protocol.h"
+#include "cgo_protocol.h"
 #include "ride_log.h"
 
-namespace esphome::cgo600 {
+namespace esphome::cgo {
 
 namespace espbt = esphome::esp32_ble_tracker;
 
 // BLE client for Tenways bikes. Unlike the stock ble_client it needs no MAC
-// address: it connects to the first advertiser whose name contains
-// device_name or that advertises a known bike service. The CGO600 speaks its
+// address: it connects to the first advertiser whose name contains one of
+// device_names or that advertises a known bike service. The CGO600 speaks its
 // protocol over the Nordic UART service; newer displays such as the CGO800's
 // use the King Meter service instead.
-class CGO600Component : public esp32_ble_client::BLEClientBase {
+class CGOComponent : public esp32_ble_client::BLEClientBase {
  public:
     void setup() override;
     void loop() override;
@@ -37,7 +38,7 @@ class CGO600Component : public esp32_ble_client::BLEClientBase {
     void connect() override;
     void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param) override;
 
-    void set_device_name(const std::string &name) { this->device_name_ = name; }
+    void set_device_names(const std::vector<std::string> &names);
     void set_poll_interval(uint32_t ms) { this->poll_interval_ms_ = ms; }
     void set_max_rides(uint16_t max_rides) { this->max_rides_ = max_rides; }
     void add_on_ride_callback(std::function<void(float, uint32_t, int)> &&callback) {
@@ -67,6 +68,7 @@ class CGO600Component : public esp32_ble_client::BLEClientBase {
         return this->state_;
     }
     const char *ble_status() const { return this->last_ble_status_ != nullptr ? this->last_ble_status_ : "searching"; }
+    // The device names joined with ", ", for display.
     const std::string &device_name() const { return this->device_name_; }
     uint32_t poll_interval_ms() const { return this->poll_interval_ms_; }
     uint32_t last_connected_at() const { return this->last_connected_at_; }
@@ -92,7 +94,8 @@ class CGO600Component : public esp32_ble_client::BLEClientBase {
     void publish_state_();
     void update_ble_status_();
 
-    std::string device_name_{"CGO"};
+    std::vector<std::string> device_names_;
+    std::string device_name_;
     uint32_t poll_interval_ms_{1000};
 
     Phase phase_{Phase::IDLE};
@@ -149,7 +152,7 @@ class CGO600Component : public esp32_ble_client::BLEClientBase {
 // (percentage points, -1 if unknown).
 class RideTrigger : public Trigger<float, uint32_t, int> {
  public:
-    explicit RideTrigger(CGO600Component *parent) {
+    explicit RideTrigger(CGOComponent *parent) {
         parent->add_on_ride_callback(
             [this](float distance_km, uint32_t duration_s, int battery_used) {
                 this->trigger(distance_km, duration_s, battery_used);
@@ -157,11 +160,11 @@ class RideTrigger : public Trigger<float, uint32_t, int> {
     }
 };
 
-class CGO600LightSwitch : public switch_::Switch, public Parented<CGO600Component> {
+class CGOLightSwitch : public switch_::Switch, public Parented<CGOComponent> {
  protected:
     void write_state(bool state) override;
 };
 
-}  // namespace esphome::cgo600
+}  // namespace esphome::cgo
 
 #endif  // USE_ESP32
