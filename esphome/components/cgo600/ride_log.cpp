@@ -70,8 +70,16 @@ bool RideLog::observe(const protocol::BikeState &state, uint32_t data_at, RideRe
         ride.duration_s = duration_delta > 0 ? duration_delta : 0;
         ride.battery_start = snap.battery;
         ride.battery_end = (int8_t) state.battery;
-        ride.avg_speed_x10 = state.avg_speed_kmh >= 0 ? (int16_t) (state.avg_speed_kmh * 10 + 0.5f) : -1;
-        ride.max_speed_x10 = state.max_speed_kmh >= 0 ? (int16_t) (state.max_speed_kmh * 10 + 0.5f) : -1;
+        // The bike resets its speed figures when switched on. A zero top speed
+        // means this reading is a departure and the arrival was missed, so the
+        // ride's speeds are gone.
+        if (state.max_speed_kmh > 0.0f) {
+            ride.avg_speed_x10 = state.avg_speed_kmh >= 0 ? (int16_t) (state.avg_speed_kmh * 10 + 0.5f) : -1;
+            ride.max_speed_x10 = (int16_t) (state.max_speed_kmh * 10 + 0.5f);
+        } else {
+            ride.avg_speed_x10 = -1;
+            ride.max_speed_x10 = -1;
+        }
         this->insert_(ride);
         this->rebase_(state, data_at);
         global_preferences->sync();

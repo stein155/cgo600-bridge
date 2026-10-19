@@ -37,7 +37,9 @@ function renderRideDetail() {
                         ride.km.toFixed(1),
                         el('span', { class: 'unit', text: 'km' }),
                     ]),
-                    el('div', { class: 'detail-when', text: fmt.dateTime(ride.start, locale) }),
+                    el('div', { class: 'detail-when', text: ride.timing === 'unknown'
+                        ? T.t('time_unknown')
+                        : (ride.timing === 'estimated' ? '≈' : '') + fmt.dateTime(ride.start, locale) }),
                 ]),
             ]),
             // Duration
@@ -45,9 +47,17 @@ function renderRideDetail() {
                 cardHeader(T.t('duration'), 'i-clock'),
                 el('div', { class: 'duration-big', text: fmt.durationLong(ride.durationMin, locale) }),
                 el('div', { class: 'kv-grid cols-2', style: { paddingTop: '14px', borderTop: '1px solid var(--border)' } }, [
-                    timestampBlock(T.t('started'), ride.start, locale),
-                    timestampBlock(T.t('ended'), ride.end, locale),
+                    ride.timing === 'unknown'
+                        ? timestampBlock(T.t('seen_parked'), ride.windowStart, locale)
+                        : timestampBlock(T.t('started'), ride.start, locale, ride.timing === 'estimated'),
+                    timestampBlock(T.t(ride.timing === 'unknown' ? 'seen_again' : 'ended'), ride.end, locale),
                 ]),
+                ride.timing !== 'observed'
+                    ? el('div', { class: 'warn-note' }, [
+                        icon('i-alert', { size: 13 }),
+                        el('span', { text: T.t(ride.timing === 'unknown' ? 'ride_time_unknown_note' : 'ride_time_estimated_note') }),
+                      ])
+                    : null,
             ]),
             // Speed
             card({}, [
@@ -88,10 +98,10 @@ function renderRideDetail() {
         ]),
     ]);
 }
-function timestampBlock(label, ts, locale) {
+function timestampBlock(label, ts, locale, approx) {
     return el('div', { class: 'timestamp-block' }, [
         el('div', { class: 'kv-label-tiny', text: label }),
-        el('div', { class: 'ts-time', text: fmt.timeOnly(ts) }),
+        el('div', { class: 'ts-time', text: (approx ? '≈' : '') + fmt.timeOnly(ts) }),
         el('div', { class: 'ts-date', text: fmt.dateLong(ts, locale) }),
     ]);
 }
