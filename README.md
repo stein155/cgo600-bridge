@@ -2,6 +2,8 @@
 
 ESP32 firmware, built on [ESPHome](https://esphome.io), that reads live telemetry from a **Tenways CGO600** e-bike over Bluetooth Low Energy and brings it into **Home Assistant**. The bridge also serves its own multilingual web dashboard (installable as a PWA) for live monitoring, light control and a ride history. Once installed, no computer is needed.
 
+> **CGO800 (experimental):** bikes whose display uses the King Meter BLE service, such as the CGO800 Plus, are detected automatically. Their protocol support is based on another bike's capture and has not been confirmed on a CGO800 yet; light control is not available for them. Logs from a CGO800 are very welcome in [issue #2](https://github.com/stein155/cgo600-bridge/issues/2).
+
 > "TENWAYS" and "CGO600" are trademarks of TENWAYS. This is an unofficial community project, not affiliated with or endorsed by TENWAYS — use at your own risk.
 
 ## Motivation
@@ -60,7 +62,7 @@ esp32_ble_tracker:
     window: 160ms
 
 cgo600:
-  device_name: CGO600   # substring of the advertised name (default: CGO600)
+  device_name: CGO      # substring of the advertised name (default: CGO)
   poll_interval: 1s     # 500ms to 10s (default: 1s)
   max_rides: 50         # rides kept on the device, 1 to 50 (default: 20)
 
@@ -165,6 +167,29 @@ The checksum is CRC-16/MODBUS (polynomial `0xA001` reflected, initial value `0xF
 | `0x17` | Total range (odometer) | uint16 BE ÷ 10 → km |
 | `0x1A` | Battery | uint8 → % |
 | `0x21` | Light | uint8 (0 = off, 1 = on) |
+
+### King Meter (CGO800)
+
+Newer displays expose a King Meter service (`43480001-f001-4b49-4e47-204d45544552`) instead of NUS. Requests are written to `43480002-…`; replies arrive as notifications on `43480003-…`. The layout and requests come from [tenways-ble](https://github.com/Styx85/tenways-ble), which captured them from the Tenways app on a Longtail Duo.
+
+```
+[type] 0x00 [len] [cmd] [payload...] [CRC16_hi] [CRC16_lo] 0x45
+```
+
+`type` is `0x62` (read) or `0x63` (write) and `len` counts `cmd` and payload. The checksum is the same CRC-16/MODBUS, sent high byte first in both directions. A read request lists keys; the reply carries `[key] [size] [value]` entries with big-endian values.
+
+| Command | Key | Field | Decoding |
+|---|---|---|---|
+| `0x0B` status | `0x06` | Speed | uint16 ÷ 10 → km/h |
+| | `0x07` | Max speed | uint16 ÷ 10 → km/h |
+| | `0x08` | Average speed | uint16 ÷ 10 → km/h |
+| | `0x0A` | Ride time | uint32 → seconds |
+| | `0x0C` | Trip distance | uint32 ÷ 10 → km |
+| | `0x0F` | Battery | uint8 → % |
+| | `0x11` | Light (unconfirmed) | uint8 (0 = off) |
+| `0x04` info | `0x70` | Serial number | ASCII string |
+
+Add `logger: logs: cgo600: VERBOSE` to log every raw notification.
 
 ## Repository layout
 

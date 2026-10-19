@@ -76,4 +76,49 @@ class FrameParser {
     size_t len_{0};
 };
 
+// King Meter transport used by newer Tenways displays such as the CGO800.
+// Frames in both directions:
+//   [type][0x00][len][cmd][payload...][crc_hi][crc_lo][0x45]
+// type is 0x62 (read) or 0x63 (write), len counts cmd + payload, and the
+// CRC-16/MODBUS over type..payload is sent high byte first. A read request
+// lists field keys; the reply carries [key][size][value] entries with
+// big-endian values. Layout and requests come from the tenways-ble project's
+// capture of the Tenways app on a Longtail Duo (MIT,
+// https://github.com/Styx85/tenways-ble).
+namespace km {
+
+static constexpr uint8_t TYPE_READ = 0x62;
+static constexpr uint8_t TYPE_WRITE = 0x63;
+static constexpr uint8_t HEADER_BYTE = 0x00;
+static constexpr uint8_t END_BYTE = 0x45;
+static constexpr size_t OVERHEAD = 6;  // type, header, len, crc_hi, crc_lo, end
+
+static constexpr uint8_t CMD_INFO = 0x04;
+static constexpr uint8_t CMD_STATUS = 0x0B;
+
+extern const Command STATUS_REQUEST;
+extern const Command INFO_REQUEST;
+
+// Reassembles notification chunks into King Meter frames and decodes status
+// and info replies into the shared BikeState.
+class FrameParser {
+ public:
+    static constexpr size_t BUFFER_SIZE = 4 * (0xFF + OVERHEAD);
+
+    void reset() { this->len_ = 0; }
+    // Same contract as protocol::FrameParser::feed. Valid frames that carry
+    // nothing we decode (writes, unknown commands) are counted in unhandled.
+    bool feed(BikeState &state, const uint8_t *data, size_t len, bool &saw_trip, uint32_t &bad_crc,
+              uint32_t &unhandled);
+
+ private:
+    void append_(const uint8_t *data, size_t len);
+    void resync_();
+
+    uint8_t buffer_[BUFFER_SIZE]{};
+    size_t len_{0};
+};
+
+}  // namespace km
+
 }  // namespace esphome::cgo600::protocol

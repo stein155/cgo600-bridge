@@ -67,7 +67,7 @@ esp32_ble_tracker:
     window: 160ms
 
 cgo600:
-  device_name: CGO600
+  device_name: CGO
   max_rides: 50
   # Every inferred ride is also sent to Home Assistant as an event.
   on_ride:
