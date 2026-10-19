@@ -5,8 +5,11 @@
 tenways_ble_cache.json
 cgo600.conf
 
-# PlatformIO
-firmware/.pio/
-# Generated from firmware/web/ by firmware/scripts/build_web.py
-firmware/data/
-firmware/.vscode/
+# ESPHome
+esphome/secrets.yaml
+esphome/.esphome/
+esphome/.gitignore
+
+# Web installer build output
+site/
+esphome/.install-*.yaml

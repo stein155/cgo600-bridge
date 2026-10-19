@@ -1,22 +1,21 @@
-# C++ style for firmware/src — mirrors the conventions in AGENTS.md.
-# Not retroactively applied to existing files; used for new code and the
-# (non-blocking) CI format check.
+# C++ style for esphome/components/cgo600 — ESPHome conventions with the
+# repo's 4-space indent. See AGENTS.md.
 ---
 Language: Cpp
 BasedOnStyle: Google
 IndentWidth: 4
 TabWidth: 4
 UseTab: Never
-ColumnLimit: 100
+ColumnLimit: 120
 # Same-line opening braces (Arduino/C++ house style).
 BreakBeforeBraces: Attach
-# Pointers/refs bind to the type: `char* p`, `const uint8_t& r`.
-PointerAlignment: Left
+# Pointers/refs bind to the name, as in ESPHome: `char *p`, `const uint8_t &r`.
+PointerAlignment: Right
 DerivePointerAlignment: false
 AllowShortFunctionsOnASingleLine: Inline
 AllowShortIfStatementsOnASingleLine: false
 AllowShortLoopsOnASingleLine: false
 KeepEmptyLinesAtTheStartOfBlocks: false
 SortIncludes: false
-SpaceAfterCStyleCast: false
+SpaceAfterCStyleCast: true
 Cpp11BracedListStyle: true
