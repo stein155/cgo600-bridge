@@ -1,4 +1,4 @@
-const CACHE_NAME = 'cgo600-shell-v18';
+const CACHE_NAME = 'cgo-shell-v19';
 const SHELL = [
     '/',
     '/index.html',

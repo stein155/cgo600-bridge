@@ -3,9 +3,9 @@ from esphome.components import text_sensor
 import esphome.config_validation as cv
 from esphome.const import ENTITY_CATEGORY_DIAGNOSTIC, ICON_BLUETOOTH
 
-from . import CGO600_CHILD_SCHEMA, CONF_CGO600_ID
+from . import CGO_CHILD_SCHEMA, CONF_CGO_ID
 
-DEPENDENCIES = ["cgo600"]
+DEPENDENCIES = ["cgo"]
 
 TEXT_SENSORS = {
     "serial_number": text_sensor.text_sensor_schema(
@@ -18,13 +18,13 @@ TEXT_SENSORS = {
     ),
 }
 
-CONFIG_SCHEMA = CGO600_CHILD_SCHEMA.extend(
+CONFIG_SCHEMA = CGO_CHILD_SCHEMA.extend(
     {cv.Optional(key): schema for key, schema in TEXT_SENSORS.items()}
 )
 
 
 async def to_code(config):
-    hub = await cg.get_variable(config[CONF_CGO600_ID])
+    hub = await cg.get_variable(config[CONF_CGO_ID])
     for key in TEXT_SENSORS:
         if key in config:
             sens = await text_sensor.new_text_sensor(config[key])

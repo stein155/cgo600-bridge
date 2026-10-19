@@ -5,9 +5,9 @@
 
 #include "esphome/core/helpers.h"
 #include "esphome/core/preferences.h"
-#include "cgo600_protocol.h"
+#include "cgo_protocol.h"
 
-namespace esphome::cgo600 {
+namespace esphome::cgo {
 
 // One inferred ride: the window between two check-ins in which the trip
 // counters advanced. Times are UTC epoch seconds.
@@ -71,4 +71,4 @@ class RideLog {
     uint32_t last_idle_save_ms_{0};
 };
 
-}  // namespace esphome::cgo600
+}  // namespace esphome::cgo

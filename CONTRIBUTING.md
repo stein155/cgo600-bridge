@@ -5,8 +5,8 @@ independent hobby project — contributions are welcome.
 
 ## Project layout
 
-- `esphome/components/cgo600/` — the ESPHome external component (C++ and Python)
-- `esphome/components/cgo600/web/` — dashboard sources, bundled and embedded
+- `esphome/components/cgo/` — the ESPHome external component (C++ and Python)
+- `esphome/components/cgo/web/` — dashboard sources, bundled and embedded
   into the firmware on every compile
 - `esphome/cgo600-install.yaml` — the configuration the web installer flashes
 - `installer/` — the web installer page and the scripts that publish it
@@ -38,8 +38,8 @@ esphome compile esphome/.install-ci.yaml
 - Keep entity keys stable: `battery`, `speed`, `max_speed`, `avg_speed`,
   `trip_distance`, `trip_duration`, `remaining_range`, `range`,
   `serial_number`, `ble_status`, `light`. They are part of the Home Assistant contract.
-- Log with ESPHome's `ESP_LOG*` macros and the component's tags (`cgo600`,
-  `cgo600.rides`, `cgo600.web`).
+- Log with ESPHome's `ESP_LOG*` macros and the component's tags (`cgo`,
+  `cgo.rides`, `cgo.web`).
 
 ## Testing
 

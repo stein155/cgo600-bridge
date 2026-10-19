@@ -6,9 +6,9 @@
 
 #include "esphome/components/web_server_base/web_server_base.h"
 #include "esphome/core/component.h"
-#include "cgo600.h"
+#include "cgo.h"
 
-namespace esphome::cgo600 {
+namespace esphome::cgo {
 
 // Serves the bridge dashboard (embedded, gzipped) and its JSON API on the
 // shared ESPHome web server:
@@ -16,9 +16,9 @@ namespace esphome::cgo600 {
 //   POST /api/light?on=0|1, /api/rides/clear, /api/rides/import?..., /api/restart
 // Requests are handled on the HTTP server task; anything that touches the
 // BLE client or flash is deferred to the main loop.
-class CGO600WebUI : public Component, public AsyncWebHandler {
+class CGOWebUI : public Component, public AsyncWebHandler {
  public:
-    CGO600WebUI(web_server_base::WebServerBase *base, CGO600Component *bike) : base_(base), bike_(bike) {}
+    CGOWebUI(web_server_base::WebServerBase *base, CGOComponent *bike) : base_(base), bike_(bike) {}
 
     void setup() override;
     void dump_config() override;
@@ -46,10 +46,10 @@ class CGO600WebUI : public Component, public AsyncWebHandler {
     void handle_import_(AsyncWebServerRequest *request);
 
     web_server_base::WebServerBase *base_;
-    CGO600Component *bike_;
+    CGOComponent *bike_;
     std::vector<Asset> assets_;
 };
 
-}  // namespace esphome::cgo600
+}  // namespace esphome::cgo
 
 #endif  // USE_ESP32

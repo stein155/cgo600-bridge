@@ -1,8 +1,8 @@
-#include "cgo600_protocol.h"
+#include "cgo_protocol.h"
 
 #include <cstring>
 
-namespace esphome::cgo600::protocol {
+namespace esphome::cgo::protocol {
 
 // Pre-built commands, captured from the Tenways app
 static const uint8_t READ_INIT_BYTES[] = {0x52, 0x02, 0x07, 0x03, 0xF3, 0x6D, 0x45};
@@ -331,4 +331,4 @@ bool FrameParser::feed(BikeState &state, const uint8_t *data, size_t len, bool &
 
 }  // namespace km
 
-}  // namespace esphome::cgo600::protocol
+}  // namespace esphome::cgo::protocol

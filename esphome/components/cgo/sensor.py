@@ -13,9 +13,9 @@ from esphome.const import (
     UNIT_SECOND,
 )
 
-from . import CGO600_CHILD_SCHEMA, CONF_CGO600_ID
+from . import CGO_CHILD_SCHEMA, CONF_CGO_ID
 
-DEPENDENCIES = ["cgo600"]
+DEPENDENCIES = ["cgo"]
 
 
 def _speed(icon):
@@ -61,13 +61,13 @@ SENSORS = {
     "range": _distance("mdi:map-marker-distance"),
 }
 
-CONFIG_SCHEMA = CGO600_CHILD_SCHEMA.extend(
+CONFIG_SCHEMA = CGO_CHILD_SCHEMA.extend(
     {cv.Optional(key): schema for key, schema in SENSORS.items()}
 )
 
 
 async def to_code(config):
-    hub = await cg.get_variable(config[CONF_CGO600_ID])
+    hub = await cg.get_variable(config[CONF_CGO_ID])
     for key in SENSORS:
         if key in config:
             sens = await sensor.new_sensor(config[key])

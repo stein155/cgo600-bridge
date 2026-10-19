@@ -20,7 +20,7 @@ AUTO_LOAD = [
 DEPENDENCIES = ["esp32", "wifi"]
 CODEOWNERS = ["@stein155"]
 
-CONF_CGO600_ID = "cgo600_id"
+CONF_CGO_ID = "cgo_id"
 CONF_DEVICE_NAME = "device_name"
 CONF_POLL_INTERVAL = "poll_interval"
 CONF_MAX_RIDES = "max_rides"
@@ -28,10 +28,10 @@ CONF_WEB_UI = "web_ui"
 CONF_WEB_UI_ID = "web_ui_id"
 CONF_ON_RIDE = "on_ride"
 
-cgo600_ns = cg.esphome_ns.namespace("cgo600")
-CGO600Component = cgo600_ns.class_("CGO600Component", esp32_ble_client.BLEClientBase)
-CGO600WebUI = cgo600_ns.class_("CGO600WebUI", cg.Component)
-RideTrigger = cgo600_ns.class_(
+cgo_ns = cg.esphome_ns.namespace("cgo")
+CGOComponent = cgo_ns.class_("CGOComponent", esp32_ble_client.BLEClientBase)
+CGOWebUI = cgo_ns.class_("CGOWebUI", cg.Component)
+RideTrigger = cgo_ns.class_(
     "RideTrigger", automation.Trigger.template(cg.float_, cg.uint32, cg.int_)
 )
 
@@ -40,7 +40,7 @@ def _no_web_server(config):
     # ESPHome's own web_server also serves "/", which would shadow the dashboard.
     if config[CONF_WEB_UI] and "web_server" in fv.full_config.get():
         raise cv.Invalid(
-            "The cgo600 dashboard and ESPHome's web_server both serve '/'. "
+            "The cgo dashboard and ESPHome's web_server both serve '/'. "
             "Remove web_server or set 'web_ui: false'."
         )
     return config
@@ -49,8 +49,8 @@ def _no_web_server(config):
 CONFIG_SCHEMA = cv.All(
     cv.Schema(
         {
-            cv.GenerateID(): cv.declare_id(CGO600Component),
-            cv.GenerateID(CONF_WEB_UI_ID): cv.declare_id(CGO600WebUI),
+            cv.GenerateID(): cv.declare_id(CGOComponent),
+            cv.GenerateID(CONF_WEB_UI_ID): cv.declare_id(CGOWebUI),
             cv.GenerateID(CONF_WEB_SERVER_BASE_ID): cv.use_id(
                 web_server_base.WebServerBase
             ),
@@ -70,14 +70,14 @@ CONFIG_SCHEMA = cv.All(
     )
     .extend(esp32_ble_tracker.ESP_BLE_DEVICE_SCHEMA)
     .extend(cv.COMPONENT_SCHEMA),
-    esp32_ble.consume_connection_slots(1, "cgo600"),
+    esp32_ble.consume_connection_slots(1, "cgo"),
 )
 
 FINAL_VALIDATE_SCHEMA = _no_web_server
 
-CGO600_CHILD_SCHEMA = cv.Schema(
+CGO_CHILD_SCHEMA = cv.Schema(
     {
-        cv.GenerateID(CONF_CGO600_ID): cv.use_id(CGO600Component),
+        cv.GenerateID(CONF_CGO_ID): cv.use_id(CGOComponent),
     }
 )
 
@@ -87,7 +87,7 @@ async def _web_ui_to_code(config, hub):
     web = cg.new_Pvariable(config[CONF_WEB_UI_ID], base, hub)
     await cg.register_component(web, {})
     for index, (path, content_type, data) in enumerate(build_assets()):
-        arr_id = ID(f"cgo600_web_asset_{index}", is_declaration=True, type=cg.uint8)
+        arr_id = ID(f"cgo_web_asset_{index}", is_declaration=True, type=cg.uint8)
         arr = cg.progmem_array(arr_id, [HexInt(b) for b in data])
         cg.add(
             web.add_asset(

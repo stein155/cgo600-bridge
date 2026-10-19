@@ -1,4 +1,4 @@
-#include "cgo600.h"
+#include "cgo.h"
 
 #ifdef USE_ESP32
 
@@ -10,9 +10,9 @@
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
 
-namespace esphome::cgo600 {
+namespace esphome::cgo {
 
-static const char *const TAG = "cgo600";
+static const char *const TAG = "cgo";
 
 static constexpr uint32_t SUBSCRIBE_SETTLE_MS = 50;
 static constexpr uint32_t HANDSHAKE_STEP_MS = 120;
@@ -65,15 +65,15 @@ static bool contains_ignore_case(const std::string &haystack, const std::string 
     return false;
 }
 
-void CGO600Component::setup() {
+void CGOComponent::setup() {
     BLEClientBase::setup();
     this->ride_log_.setup(this->max_rides_);
     this->restore_last_state_();
     this->update_ble_status_();
 }
 
-void CGO600Component::dump_config() {
-    ESP_LOGCONFIG(TAG, "CGO600:");
+void CGOComponent::dump_config() {
+    ESP_LOGCONFIG(TAG, "CGO:");
     ESP_LOGCONFIG(TAG, "  Device name: %s", this->device_name_.c_str());
     ESP_LOGCONFIG(TAG, "  Poll interval: %u ms", (unsigned) this->poll_interval_ms_);
     ESP_LOGCONFIG(TAG, "  Rides stored: %u of %u", (unsigned) this->ride_log_.count(),
@@ -91,7 +91,7 @@ void CGO600Component::dump_config() {
     LOG_SWITCH("  ", "Light", this->light_switch_);
 }
 
-bool CGO600Component::matches_(const espbt::ESPBTDevice &device) const {
+bool CGOComponent::matches_(const espbt::ESPBTDevice &device) const {
     if (contains_ignore_case(device.get_name(), this->device_name_))
         return true;
     // The bike sometimes omits its name; its service still identifies it.
@@ -102,7 +102,7 @@ bool CGO600Component::matches_(const espbt::ESPBTDevice &device) const {
     return false;
 }
 
-bool CGO600Component::parse_device(const espbt::ESPBTDevice &device) {
+bool CGOComponent::parse_device(const espbt::ESPBTDevice &device) {
     if (this->state() != espbt::ClientState::IDLE || !this->matches_(device))
         return false;
 
@@ -113,7 +113,7 @@ bool CGO600Component::parse_device(const espbt::ESPBTDevice &device) {
     return true;
 }
 
-void CGO600Component::set_state(espbt::ClientState state) {
+void CGOComponent::set_state(espbt::ClientState state) {
     BLEClientBase::set_state(state);
     if (state == espbt::ClientState::IDLE) {
         this->reset_session_();
@@ -121,13 +121,13 @@ void CGO600Component::set_state(espbt::ClientState state) {
     this->update_ble_status_();
 }
 
-void CGO600Component::connect() {
+void CGOComponent::connect() {
     this->connect_started_ms_ = millis();
     this->set_conn_params_(FAST_MIN_INTERVAL, FAST_MAX_INTERVAL, CONN_LATENCY, CONN_SUPERVISION_TIMEOUT, "fast");
     BLEClientBase::connect();
 }
 
-void CGO600Component::gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param) {
+void CGOComponent::gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param) {
     BLEClientBase::gap_event_handler(event, param);
     if (event == ESP_GAP_BLE_UPDATE_CONN_PARAMS_EVT && this->check_addr(param->update_conn_params.bda)) {
         ESP_LOGD(TAG, "Connection params: interval=%.2f ms latency=%u timeout=%u ms (status=%d)",
@@ -136,7 +136,7 @@ void CGO600Component::gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_ga
     }
 }
 
-bool CGO600Component::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if,
+bool CGOComponent::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if,
                                           esp_ble_gattc_cb_param_t *param) {
     if (!BLEClientBase::gattc_event_handler(event, gattc_if, param))
         return false;
@@ -218,7 +218,7 @@ bool CGO600Component::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_i
     return true;
 }
 
-void CGO600Component::on_services_ready_() {
+void CGOComponent::on_services_ready_() {
     esp32_ble_client::BLECharacteristic *tx = nullptr;
     esp32_ble_client::BLECharacteristic *rx = nullptr;
     if (this->get_service(NUS_SERVICE_UUID) != nullptr) {
@@ -252,7 +252,7 @@ void CGO600Component::on_services_ready_() {
 
 // Lists what the bike offers, so a log from an unsupported model shows which
 // service it uses.
-void CGO600Component::log_services_() {
+void CGOComponent::log_services_() {
     char uuid[esp32_ble::UUID_STR_LEN];
     for (auto *service : this->services_) {
         ESP_LOGW(TAG, "  Service %s", service->uuid.to_str(uuid));
@@ -263,7 +263,7 @@ void CGO600Component::log_services_() {
     }
 }
 
-void CGO600Component::loop() {
+void CGOComponent::loop() {
     BLEClientBase::loop();
 
     const uint32_t now = millis();
@@ -284,7 +284,7 @@ void CGO600Component::loop() {
 
 // Same sequence and spacing as the standalone firmware's runHandshake(), but
 // non-blocking: one step per HANDSHAKE_STEP_MS from loop().
-void CGO600Component::run_handshake_step_(uint32_t now) {
+void CGOComponent::run_handshake_step_(uint32_t now) {
     if ((int32_t) (now - this->next_step_at_) < 0)
         return;
 
@@ -320,7 +320,7 @@ void CGO600Component::run_handshake_step_(uint32_t now) {
     this->update_ble_status_();
 }
 
-void CGO600Component::request_static_fields_() {
+void CGOComponent::request_static_fields_() {
     this->last_static_request_ = millis();
     bool ok;
     if (this->transport_ == Transport::KING_METER) {
@@ -335,16 +335,16 @@ void CGO600Component::request_static_fields_() {
         ESP_LOGW(TAG, "Static field request failed");
 }
 
-void CGO600Component::poll_() {
+void CGOComponent::poll_() {
     const auto &cmd =
         this->transport_ == Transport::KING_METER ? protocol::km::STATUS_REQUEST : protocol::READ_DATA_CMD;
     if (!this->write_(cmd))
         ESP_LOGW(TAG, "Poll write failed");
 }
 
-bool CGO600Component::write_(const protocol::Command &cmd) { return this->write_(cmd.data, cmd.len); }
+bool CGOComponent::write_(const protocol::Command &cmd) { return this->write_(cmd.data, cmd.len); }
 
-bool CGO600Component::write_(const uint8_t *data, size_t len) {
+bool CGOComponent::write_(const uint8_t *data, size_t len) {
     if (this->rx_handle_ == 0 || !this->connected() || len > MAX_WRITE_LEN)
         return false;
 
@@ -362,7 +362,7 @@ bool CGO600Component::write_(const uint8_t *data, size_t len) {
     return err == ESP_OK;
 }
 
-bool CGO600Component::set_light(bool on) {
+bool CGOComponent::set_light(bool on) {
     if (this->phase_ != Phase::POLLING) {
         ESP_LOGW(TAG, "Light command ignored: bike not connected");
         return false;
@@ -387,7 +387,7 @@ bool CGO600Component::set_light(bool on) {
 // Scanning keeps running alongside an established connection by default. With
 // WiFi sharing the radio that costs connection events and the link drops with
 // supervision timeouts, so scan only while the bike is not connected.
-void CGO600Component::pause_scanning_() {
+void CGOComponent::pause_scanning_() {
     auto *tracker = espbt::global_esp32_ble_tracker;
     if (tracker == nullptr || this->scan_paused_)
         return;
@@ -395,7 +395,7 @@ void CGO600Component::pause_scanning_() {
     tracker->stop_scan();
 }
 
-void CGO600Component::resume_scanning_() {
+void CGOComponent::resume_scanning_() {
     auto *tracker = espbt::global_esp32_ble_tracker;
     if (tracker == nullptr || !this->scan_paused_)
         return;
@@ -404,7 +404,7 @@ void CGO600Component::resume_scanning_() {
     tracker->set_scan_continuous(true);
 }
 
-void CGO600Component::reset_session_() {
+void CGOComponent::reset_session_() {
     this->resume_scanning_();
     if (this->phase_ == Phase::POLLING) {
         // Keep the last readings, but a speed from before the bike left is no
@@ -428,8 +428,8 @@ void CGO600Component::reset_session_() {
     this->km_parser_.reset();
 }
 
-void CGO600Component::restore_last_state_() {
-    this->last_state_pref_ = global_preferences->make_preference<LastState>(fnv1_hash("cgo600_last_state"));
+void CGOComponent::restore_last_state_() {
+    this->last_state_pref_ = global_preferences->make_preference<LastState>(fnv1_hash("cgo_last_state"));
     LastState saved{};
     if (!this->last_state_pref_.load(&saved) || saved.magic != LAST_STATE_MAGIC)
         return;
@@ -442,7 +442,7 @@ void CGO600Component::restore_last_state_() {
     this->publish_state_();
 }
 
-void CGO600Component::save_last_state_() {
+void CGOComponent::save_last_state_() {
     if (!this->last_state_dirty_)
         return;
     LastState data{};
@@ -467,7 +467,7 @@ static void publish_if_changed(sensor::Sensor *sensor, float value) {
         sensor->publish_state(value);
 }
 
-void CGO600Component::publish_state_() {
+void CGOComponent::publish_state_() {
     const auto &s = this->state_;
     publish_if_changed(this->battery_sensor_, s.battery);
     publish_if_changed(this->speed_sensor_, s.speed_kmh);
@@ -493,7 +493,7 @@ void CGO600Component::publish_state_() {
     }
 }
 
-void CGO600Component::update_ble_status_() {
+void CGOComponent::update_ble_status_() {
     const char *status;
     if (this->phase_ == Phase::POLLING) {
         status = "connected";
@@ -520,7 +520,7 @@ void CGO600Component::update_ble_status_() {
         this->ble_status_text_sensor_->publish_state(status);
 }
 
-void CGO600LightSwitch::write_state(bool state) {
+void CGOLightSwitch::write_state(bool state) {
     // Optimistic: the next poll publishes the bike's actual light state.
     if (this->parent_->set_light(state)) {
         this->publish_state(state);
@@ -529,6 +529,6 @@ void CGO600LightSwitch::write_state(bool state) {
     }
 }
 
-}  // namespace esphome::cgo600
+}  // namespace esphome::cgo
 
 #endif  // USE_ESP32

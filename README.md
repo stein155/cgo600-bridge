@@ -41,7 +41,7 @@ Updates are installed over WiFi from the ESPHome dashboard. In the ESPHome add-o
 
 ### Add to your own ESPHome configuration
 
-The `cgo600` component can be added to any ESP32 configuration that uses the `esp-idf` framework:
+The `cgo` component can be added to any ESP32 configuration that uses the `esp-idf` framework:
 
 ```yaml
 external_components:
@@ -49,7 +49,7 @@ external_components:
       type: git
       url: https://github.com/stein155/cgo600-bridge
       path: esphome/components
-    components: [cgo600]
+    components: [cgo]
 
 time:
   - platform: sntp   # wall-clock time for the ride history
@@ -61,20 +61,20 @@ esp32_ble_tracker:
     interval: 320ms
     window: 160ms
 
-cgo600:
+cgo:
   device_name: CGO      # substring of the advertised name (default: CGO)
   poll_interval: 1s     # 500ms to 10s (default: 1s)
   max_rides: 50         # rides kept on the device, 1 to 50 (default: 20)
 
 sensor:
-  - platform: cgo600
+  - platform: cgo
     battery:
       name: Battery
     range:
       name: Total range
 
 switch:
-  - platform: cgo600
+  - platform: cgo
     light:
       name: Light
 ```
@@ -97,10 +97,10 @@ All keys are optional. `range` is the bike's total odometer.
 Every inferred ride fires the `on_ride` trigger with `distance_km`, `duration_s` and `battery_used`. The ready-made configuration forwards it as a Home Assistant event, which you can use in automations:
 
 ```yaml
-cgo600:
+cgo:
   on_ride:
     - homeassistant.event:
-        event: esphome.cgo600_ride
+        event: esphome.cgo_ride
         data:
           distance_km: !lambda 'return str_sprintf("%.1f", distance_km);'
 ```
@@ -130,6 +130,15 @@ The bridge only sees the bike when it connects, typically on departure or arriva
 ## Bluetooth notes
 
 The component uses one BLE connection slot, which counts towards `esp32_ble: max_connections`. While the bike is connected, it pauses scanning and requests a relaxed connection interval with a 10 s supervision timeout, because scanning during the connection caused regular disconnects.
+
+## Upgrading to the `cgo` component name
+
+The component was renamed from `cgo600` to `cgo` now that it also supports the CGO800. This is a breaking change for existing installations:
+
+1. Before updating, save your rides: open `http://<bridge>/api/rides` and save the JSON. The ride history is stored under a new key and starts empty after the update.
+2. In your ESPHome configuration, replace `components: [cgo600]` with `components: [cgo]`, the `cgo600:` block with `cgo:`, and every `platform: cgo600` with `platform: cgo`. Configurations still using `cgo600` no longer compile.
+3. Update Home Assistant automations that listen for `esphome.cgo600_ride` to `esphome.cgo_ride`, and the `event:` in your `on_ride` action.
+4. After updating, import the saved rides under *Settings → Ride history → Import rides*. The dashboard's language and theme are reset once.
 
 ## Migrating from the standalone firmware
 
@@ -189,7 +198,7 @@ Newer displays expose a King Meter service (`43480001-f001-4b49-4e47-204d4554455
 | | `0x11` | Light (unconfirmed) | uint8 (0 = off) |
 | `0x04` info | `0x70` | Serial number | ASCII string |
 
-Add `logger: logs: cgo600: VERBOSE` to log every raw notification.
+Add `logger: logs: cgo: VERBOSE` to log every raw notification.
 
 ## Repository layout
 
@@ -197,10 +206,10 @@ Add `logger: logs: cgo600: VERBOSE` to log every raw notification.
 esphome/
   cgo600-install.yaml       Ready-made configuration flashed by the web installer
   cgo600.yaml               Development example configuration
-  components/cgo600/
+  components/cgo/
     __init__.py             Configuration schema and code generation
-    cgo600.h/.cpp           BLE client: discovery, handshake, polling, entities
-    cgo600_protocol.h/.cpp  Frames, CRC and field decoding
+    cgo.h/.cpp              BLE client: discovery, handshake, polling, entities
+    cgo_protocol.h/.cpp     Frames, CRC and field decoding
     ride_log.h/.cpp         Ride inference and flash storage
     web_ui.h/.cpp           Dashboard and JSON API on the ESPHome web server
     web_assets.py           Bundles and gzips web/ into the firmware
@@ -216,4 +225,4 @@ installer/
 
 ### Dashboard development
 
-Edit the sources in `esphome/components/cgo600/web/`. They are bundled and embedded on every `esphome compile`. A new JS file must be added to `JS_ORDER` in `web_assets.py`; CSS files are bundled in filename order. Run `python3 esphome/components/cgo600/web_assets.py` to see the bundle sizes.
+Edit the sources in `esphome/components/cgo/web/`. They are bundled and embedded on every `esphome compile`. A new JS file must be added to `JS_ORDER` in `web_assets.py`; CSS files are bundled in filename order. Run `python3 esphome/components/cgo/web_assets.py` to see the bundle sizes.

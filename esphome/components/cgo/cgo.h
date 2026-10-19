@@ -13,10 +13,10 @@
 #include "esphome/core/component.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/preferences.h"
-#include "cgo600_protocol.h"
+#include "cgo_protocol.h"
 #include "ride_log.h"
 
-namespace esphome::cgo600 {
+namespace esphome::cgo {
 
 namespace espbt = esphome::esp32_ble_tracker;
 
@@ -25,7 +25,7 @@ namespace espbt = esphome::esp32_ble_tracker;
 // device_name or that advertises a known bike service. The CGO600 speaks its
 // protocol over the Nordic UART service; newer displays such as the CGO800's
 // use the King Meter service instead.
-class CGO600Component : public esp32_ble_client::BLEClientBase {
+class CGOComponent : public esp32_ble_client::BLEClientBase {
  public:
     void setup() override;
     void loop() override;
@@ -149,7 +149,7 @@ class CGO600Component : public esp32_ble_client::BLEClientBase {
 // (percentage points, -1 if unknown).
 class RideTrigger : public Trigger<float, uint32_t, int> {
  public:
-    explicit RideTrigger(CGO600Component *parent) {
+    explicit RideTrigger(CGOComponent *parent) {
         parent->add_on_ride_callback(
             [this](float distance_km, uint32_t duration_s, int battery_used) {
                 this->trigger(distance_km, duration_s, battery_used);
@@ -157,11 +157,11 @@ class RideTrigger : public Trigger<float, uint32_t, int> {
     }
 };
 
-class CGO600LightSwitch : public switch_::Switch, public Parented<CGO600Component> {
+class CGOLightSwitch : public switch_::Switch, public Parented<CGOComponent> {
  protected:
     void write_state(bool state) override;
 };
 
-}  // namespace esphome::cgo600
+}  // namespace esphome::cgo
 
 #endif  // USE_ESP32
