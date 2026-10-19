@@ -59,7 +59,7 @@ esp32_ble_tracker:
 
 cgo600:
   id: bike
-  device_name: CGO600
+  device_name: CGO
   poll_interval: 1s
   max_rides: 50
   # Every inferred ride is also sent to Home Assistant as an event.

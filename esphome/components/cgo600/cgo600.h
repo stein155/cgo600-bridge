@@ -20,9 +20,11 @@ namespace esphome::cgo600 {
 
 namespace espbt = esphome::esp32_ble_tracker;
 
-// BLE client for the Tenways CGO600. Unlike the stock ble_client it needs no
-// MAC address: it connects to the first advertiser whose name contains
-// device_name or that advertises the Nordic UART service.
+// BLE client for Tenways bikes. Unlike the stock ble_client it needs no MAC
+// address: it connects to the first advertiser whose name contains
+// device_name or that advertises a known bike service. The CGO600 speaks its
+// protocol over the Nordic UART service; newer displays such as the CGO800's
+// use the King Meter service instead.
 class CGO600Component : public esp32_ble_client::BLEClientBase {
  public:
     void setup() override;
@@ -72,13 +74,16 @@ class CGO600Component : public esp32_ble_client::BLEClientBase {
 
  protected:
     enum class Phase : uint8_t { IDLE, HANDSHAKE, POLLING };
+    enum class Transport : uint8_t { NONE, NUS, KING_METER };
 
     bool matches_(const espbt::ESPBTDevice &device) const;
     void on_services_ready_();
+    void log_services_();
     void run_handshake_step_(uint32_t now);
     bool write_(const protocol::Command &cmd);
     bool write_(const uint8_t *data, size_t len);
     void request_static_fields_();
+    void poll_();
     void reset_session_();
     void restore_last_state_();
     void save_last_state_();
@@ -87,16 +92,18 @@ class CGO600Component : public esp32_ble_client::BLEClientBase {
     void publish_state_();
     void update_ble_status_();
 
-    std::string device_name_{"CGO600"};
+    std::string device_name_{"CGO"};
     uint32_t poll_interval_ms_{1000};
 
     Phase phase_{Phase::IDLE};
+    Transport transport_{Transport::NONE};
     uint8_t handshake_step_{0};
     uint32_t next_step_at_{0};
     uint32_t connect_started_ms_{0};
     uint32_t last_poll_{0};
     uint32_t last_static_request_{0};
     uint32_t bad_crc_count_{0};
+    uint32_t unhandled_frame_count_{0};
     // After a light command, light reports that still show the old state are
     // ignored until this deadline; the bike applies the change with a delay.
     uint32_t light_pending_until_{0};
@@ -122,6 +129,7 @@ class CGO600Component : public esp32_ble_client::BLEClientBase {
     bool last_state_dirty_{false};
     uint32_t last_state_saved_ms_{0};
     protocol::FrameParser parser_;
+    protocol::km::FrameParser km_parser_;
     const char *last_ble_status_{nullptr};
 
     sensor::Sensor *battery_sensor_{nullptr};

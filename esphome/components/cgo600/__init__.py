@@ -54,7 +54,7 @@ CONFIG_SCHEMA = cv.All(
             cv.GenerateID(CONF_WEB_SERVER_BASE_ID): cv.use_id(
                 web_server_base.WebServerBase
             ),
-            cv.Optional(CONF_DEVICE_NAME, default="CGO600"): cv.string_strict,
+            cv.Optional(CONF_DEVICE_NAME, default="CGO"): cv.string_strict,
             cv.Optional(CONF_POLL_INTERVAL, default="1s"): cv.All(
                 cv.positive_time_period_milliseconds,
                 cv.Range(

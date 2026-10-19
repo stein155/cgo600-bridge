@@ -2,6 +2,7 @@
 
 #ifdef USE_ESP32
 
+#include <algorithm>
 #include <cctype>
 #include <cstring>
 #include <ctime>
@@ -44,6 +45,10 @@ static uint32_t epoch_now() {
 static const espbt::ESPBTUUID NUS_SERVICE_UUID = espbt::ESPBTUUID::from_raw("6e400001-b5a3-f393-e0a9-e50e24dcca9e");
 static const espbt::ESPBTUUID NUS_RX_UUID = espbt::ESPBTUUID::from_raw("6e400002-b5a3-f393-e0a9-e50e24dcca9e");
 static const espbt::ESPBTUUID NUS_TX_UUID = espbt::ESPBTUUID::from_raw("6e400003-b5a3-f393-e0a9-e50e24dcca9e");
+// "KING METER" in ASCII.
+static const espbt::ESPBTUUID KM_SERVICE_UUID = espbt::ESPBTUUID::from_raw("43480001-f001-4b49-4e47-204d45544552");
+static const espbt::ESPBTUUID KM_WRITE_UUID = espbt::ESPBTUUID::from_raw("43480002-f001-4b49-4e47-204d45544552");
+static const espbt::ESPBTUUID KM_NOTIFY_UUID = espbt::ESPBTUUID::from_raw("43480003-f001-4b49-4e47-204d45544552");
 
 static bool contains_ignore_case(const std::string &haystack, const std::string &needle) {
     if (needle.empty() || needle.size() > haystack.size())
@@ -89,10 +94,9 @@ void CGO600Component::dump_config() {
 bool CGO600Component::matches_(const espbt::ESPBTDevice &device) const {
     if (contains_ignore_case(device.get_name(), this->device_name_))
         return true;
-    // The bike sometimes omits its name; the Nordic UART service still
-    // identifies the controller's BLE bridge.
+    // The bike sometimes omits its name; its service still identifies it.
     for (const auto &uuid : device.get_service_uuids()) {
-        if (uuid == NUS_SERVICE_UUID)
+        if (uuid == NUS_SERVICE_UUID || uuid == KM_SERVICE_UUID)
             return true;
     }
     return false;
@@ -161,13 +165,27 @@ bool CGO600Component::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_i
         case ESP_GATTC_NOTIFY_EVT: {
             if (param->notify.handle != this->tx_handle_)
                 break;
+#if ESPHOME_LOG_LEVEL >= ESPHOME_LOG_LEVEL_VERBOSE
+            char hex[format_hex_pretty_size(64)];
+            ESP_LOGV(TAG, "RX %u bytes: %s", param->notify.value_len,
+                     format_hex_pretty_to(hex, param->notify.value, std::min<size_t>(param->notify.value_len, 64)));
+#endif
             bool saw_trip = false;
             bool changed;
+            const uint32_t unhandled_before = this->unhandled_frame_count_;
             {
                 LockGuard guard(this->state_mutex_);
-                changed = this->parser_.feed(this->state_, param->notify.value, param->notify.value_len, saw_trip,
-                                             this->bad_crc_count_);
+                if (this->transport_ == Transport::KING_METER) {
+                    changed = this->km_parser_.feed(this->state_, param->notify.value, param->notify.value_len,
+                                                    saw_trip, this->bad_crc_count_, this->unhandled_frame_count_);
+                } else {
+                    changed = this->parser_.feed(this->state_, param->notify.value, param->notify.value_len,
+                                                 saw_trip, this->bad_crc_count_);
+                }
             }
+            if (this->unhandled_frame_count_ != unhandled_before)
+                ESP_LOGD(TAG, "Received a frame without known fields (%u so far)",
+                         (unsigned) this->unhandled_frame_count_);
             if (changed) {
                 if (this->connect_started_ms_ != 0) {
                     ESP_LOGI(TAG, "First data %u ms after connecting", (unsigned) (millis() - this->connect_started_ms_));
@@ -201,13 +219,25 @@ bool CGO600Component::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_i
 }
 
 void CGO600Component::on_services_ready_() {
-    auto *tx = this->get_characteristic(NUS_SERVICE_UUID, NUS_TX_UUID);
-    auto *rx = this->get_characteristic(NUS_SERVICE_UUID, NUS_RX_UUID);
+    esp32_ble_client::BLECharacteristic *tx = nullptr;
+    esp32_ble_client::BLECharacteristic *rx = nullptr;
+    if (this->get_service(NUS_SERVICE_UUID) != nullptr) {
+        this->transport_ = Transport::NUS;
+        tx = this->get_characteristic(NUS_SERVICE_UUID, NUS_TX_UUID);
+        rx = this->get_characteristic(NUS_SERVICE_UUID, NUS_RX_UUID);
+    } else if (this->get_service(KM_SERVICE_UUID) != nullptr) {
+        this->transport_ = Transport::KING_METER;
+        tx = this->get_characteristic(KM_SERVICE_UUID, KM_NOTIFY_UUID);
+        rx = this->get_characteristic(KM_SERVICE_UUID, KM_WRITE_UUID);
+    }
     if (tx == nullptr || rx == nullptr) {
-        ESP_LOGE(TAG, "Nordic UART service not found (tx=%s rx=%s)", YESNO(tx != nullptr), YESNO(rx != nullptr));
+        ESP_LOGE(TAG, "No supported bike service found (tx=%s rx=%s)", YESNO(tx != nullptr), YESNO(rx != nullptr));
+        this->log_services_();
         this->disconnect();
         return;
     }
+    ESP_LOGI(TAG, "Using the %s protocol",
+             this->transport_ == Transport::KING_METER ? "King Meter" : "Nordic UART (CGO600)");
     this->tx_handle_ = tx->handle;
     this->rx_handle_ = rx->handle;
     this->update_conn_params_(RELAXED_MIN_INTERVAL, RELAXED_MAX_INTERVAL, CONN_LATENCY, CONN_SUPERVISION_TIMEOUT,
@@ -220,6 +250,19 @@ void CGO600Component::on_services_ready_() {
     }
 }
 
+// Lists what the bike offers, so a log from an unsupported model shows which
+// service it uses.
+void CGO600Component::log_services_() {
+    char uuid[esp32_ble::UUID_STR_LEN];
+    for (auto *service : this->services_) {
+        ESP_LOGW(TAG, "  Service %s", service->uuid.to_str(uuid));
+        service->parse_characteristics();
+        for (auto *chr : service->characteristics) {
+            ESP_LOGW(TAG, "    Characteristic %s (properties 0x%02X)", chr->uuid.to_str(uuid), chr->properties);
+        }
+    }
+}
+
 void CGO600Component::loop() {
     BLEClientBase::loop();
 
@@ -229,8 +272,7 @@ void CGO600Component::loop() {
     } else if (this->phase_ == Phase::POLLING) {
         if (now - this->last_poll_ >= this->poll_interval_ms_) {
             this->last_poll_ = now;
-            if (!this->write_(protocol::READ_DATA_CMD))
-                ESP_LOGW(TAG, "Poll write failed");
+            this->poll_();
         }
         if (this->last_state_dirty_ && now - this->last_state_saved_ms_ >= LAST_STATE_SAVE_INTERVAL_MS)
             this->save_last_state_();
@@ -254,7 +296,8 @@ void CGO600Component::run_handshake_step_(uint32_t now) {
     };
     static constexpr uint8_t STEP_COUNT = sizeof(STEPS) / sizeof(STEPS[0]);
 
-    if (this->handshake_step_ < STEP_COUNT) {
+    // King Meter displays answer read requests without a handshake.
+    if (this->transport_ == Transport::NUS && this->handshake_step_ < STEP_COUNT) {
         if (!this->write_(*STEPS[this->handshake_step_])) {
             ESP_LOGW(TAG, "Handshake step %u failed, disconnecting", this->handshake_step_);
             this->disconnect();
@@ -278,12 +321,25 @@ void CGO600Component::run_handshake_step_(uint32_t now) {
 }
 
 void CGO600Component::request_static_fields_() {
-    static const uint8_t FIELDS[] = {protocol::FIELD_SN};
-    uint8_t cmd[sizeof(FIELDS) + 5];
-    const size_t len = protocol::build_request(cmd, FIELDS, sizeof(FIELDS));
     this->last_static_request_ = millis();
-    if (!this->write_(cmd, len))
+    bool ok;
+    if (this->transport_ == Transport::KING_METER) {
+        ok = this->write_(protocol::km::INFO_REQUEST);
+    } else {
+        static const uint8_t FIELDS[] = {protocol::FIELD_SN};
+        uint8_t cmd[sizeof(FIELDS) + 5];
+        const size_t len = protocol::build_request(cmd, FIELDS, sizeof(FIELDS));
+        ok = this->write_(cmd, len);
+    }
+    if (!ok)
         ESP_LOGW(TAG, "Static field request failed");
+}
+
+void CGO600Component::poll_() {
+    const auto &cmd =
+        this->transport_ == Transport::KING_METER ? protocol::km::STATUS_REQUEST : protocol::READ_DATA_CMD;
+    if (!this->write_(cmd))
+        ESP_LOGW(TAG, "Poll write failed");
 }
 
 bool CGO600Component::write_(const protocol::Command &cmd) { return this->write_(cmd.data, cmd.len); }
@@ -309,6 +365,11 @@ bool CGO600Component::write_(const uint8_t *data, size_t len) {
 bool CGO600Component::set_light(bool on) {
     if (this->phase_ != Phase::POLLING) {
         ESP_LOGW(TAG, "Light command ignored: bike not connected");
+        return false;
+    }
+    if (this->transport_ == Transport::KING_METER) {
+        // The light command of the King Meter protocol is not known yet.
+        ESP_LOGW(TAG, "Light control is not supported on this bike");
         return false;
     }
     if (!this->write_(on ? protocol::LIGHT_ON_CMD : protocol::LIGHT_OFF_CMD)) {
@@ -359,10 +420,12 @@ void CGO600Component::reset_session_() {
         global_preferences->sync();  // disconnects are rare; do not wait for the periodic flush
     }
     this->phase_ = Phase::IDLE;
+    this->transport_ = Transport::NONE;
     this->handshake_step_ = 0;
     this->tx_handle_ = 0;
     this->rx_handle_ = 0;
     this->parser_.reset();
+    this->km_parser_.reset();
 }
 
 void CGO600Component::restore_last_state_() {
