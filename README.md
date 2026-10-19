@@ -62,9 +62,9 @@ esp32_ble_tracker:
     window: 160ms
 
 cgo:
-  device_name: CGO      # substring of the advertised name (default: CGO)
-  poll_interval: 1s     # 500ms to 10s (default: 1s)
-  max_rides: 50         # rides kept on the device, 1 to 50 (default: 20)
+  device_names: [CGO600, CGO800]  # part of the advertised name, any case (default: CGO600, CGO800)
+  poll_interval: 1s               # 500ms to 10s (default: 1s)
+  max_rides: 50                   # rides kept on the device, 1 to 50 (default: 20)
 
 sensor:
   - platform: cgo

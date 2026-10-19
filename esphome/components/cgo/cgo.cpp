@@ -72,9 +72,19 @@ void CGOComponent::setup() {
     this->update_ble_status_();
 }
 
+void CGOComponent::set_device_names(const std::vector<std::string> &names) {
+    this->device_names_ = names;
+    this->device_name_.clear();
+    for (const auto &name : names) {
+        if (!this->device_name_.empty())
+            this->device_name_ += ", ";
+        this->device_name_ += name;
+    }
+}
+
 void CGOComponent::dump_config() {
     ESP_LOGCONFIG(TAG, "CGO:");
-    ESP_LOGCONFIG(TAG, "  Device name: %s", this->device_name_.c_str());
+    ESP_LOGCONFIG(TAG, "  Device names: %s", this->device_name_.c_str());
     ESP_LOGCONFIG(TAG, "  Poll interval: %u ms", (unsigned) this->poll_interval_ms_);
     ESP_LOGCONFIG(TAG, "  Rides stored: %u of %u", (unsigned) this->ride_log_.count(),
                   (unsigned) this->ride_log_.max_rides());
@@ -92,8 +102,10 @@ void CGOComponent::dump_config() {
 }
 
 bool CGOComponent::matches_(const espbt::ESPBTDevice &device) const {
-    if (contains_ignore_case(device.get_name(), this->device_name_))
-        return true;
+    for (const auto &name : this->device_names_) {
+        if (contains_ignore_case(device.get_name(), name))
+            return true;
+    }
     // The bike sometimes omits its name; its service still identifies it.
     for (const auto &uuid : device.get_service_uuids()) {
         if (uuid == NUS_SERVICE_UUID || uuid == KM_SERVICE_UUID)

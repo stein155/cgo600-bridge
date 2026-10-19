@@ -22,11 +22,15 @@ CODEOWNERS = ["@stein155"]
 
 CONF_CGO_ID = "cgo_id"
 CONF_DEVICE_NAME = "device_name"
+CONF_DEVICE_NAMES = "device_names"
 CONF_POLL_INTERVAL = "poll_interval"
 CONF_MAX_RIDES = "max_rides"
 CONF_WEB_UI = "web_ui"
 CONF_WEB_UI_ID = "web_ui_id"
 CONF_ON_RIDE = "on_ride"
+
+# Matched case-insensitively as substrings, so CGO800 also finds "CGO800 PLUS".
+DEFAULT_DEVICE_NAMES = ["CGO600", "CGO800"]
 
 cgo_ns = cg.esphome_ns.namespace("cgo")
 CGOComponent = cgo_ns.class_("CGOComponent", esp32_ble_client.BLEClientBase)
@@ -34,6 +38,17 @@ CGOWebUI = cgo_ns.class_("CGOWebUI", cg.Component)
 RideTrigger = cgo_ns.class_(
     "RideTrigger", automation.Trigger.template(cg.float_, cg.uint32, cg.int_)
 )
+
+
+def _device_names(config):
+    # device_name (a single name) is still accepted for older configurations.
+    if CONF_DEVICE_NAME in config:
+        if CONF_DEVICE_NAMES in config:
+            raise cv.Invalid("Set either device_name or device_names, not both.")
+        config[CONF_DEVICE_NAMES] = [config.pop(CONF_DEVICE_NAME)]
+    elif CONF_DEVICE_NAMES not in config:
+        config[CONF_DEVICE_NAMES] = list(DEFAULT_DEVICE_NAMES)
+    return config
 
 
 def _no_web_server(config):
@@ -54,7 +69,10 @@ CONFIG_SCHEMA = cv.All(
             cv.GenerateID(CONF_WEB_SERVER_BASE_ID): cv.use_id(
                 web_server_base.WebServerBase
             ),
-            cv.Optional(CONF_DEVICE_NAME, default="CGO"): cv.string_strict,
+            cv.Optional(CONF_DEVICE_NAME): cv.string_strict,
+            cv.Optional(CONF_DEVICE_NAMES): cv.All(
+                cv.ensure_list(cv.string_strict), cv.Length(min=1)
+            ),
             cv.Optional(CONF_POLL_INTERVAL, default="1s"): cv.All(
                 cv.positive_time_period_milliseconds,
                 cv.Range(
@@ -70,6 +88,7 @@ CONFIG_SCHEMA = cv.All(
     )
     .extend(esp32_ble_tracker.ESP_BLE_DEVICE_SCHEMA)
     .extend(cv.COMPONENT_SCHEMA),
+    _device_names,
     esp32_ble.consume_connection_slots(1, "cgo"),
 )
 
@@ -103,7 +122,7 @@ async def to_code(config):
     var = cg.new_Pvariable(config[CONF_ID])
     await cg.register_component(var, config)
     await esp32_ble_tracker.register_client(var, config)
-    cg.add(var.set_device_name(config[CONF_DEVICE_NAME]))
+    cg.add(var.set_device_names(config[CONF_DEVICE_NAMES]))
     cg.add(var.set_poll_interval(config[CONF_POLL_INTERVAL]))
     cg.add(var.set_max_rides(config[CONF_MAX_RIDES]))
 
