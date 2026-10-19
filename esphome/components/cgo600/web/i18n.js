@@ -61,6 +61,11 @@ const I18N = {
         battery_used: 'Battery used',
         battery_at_start: 'At start',
         battery_at_end: 'At end',
+        seen_parked: 'Last seen parked',
+        seen_again: 'Seen again',
+        time_unknown: 'Time unknown',
+        ride_time_estimated_note: 'The bridge didn’t see the bike leave, so the start is estimated from the riding time.',
+        ride_time_unknown_note: 'The bridge saw neither the departure nor the arrival. The ride took place somewhere between these two check-ins; speeds are unknown.',
         ride_quality_note: 'Average is computed over the full window — brief stops aren’t detected. If the bike is powered off and back on mid-ride, the counters reset and this ride may be incomplete.',
 
         settings: 'Settings',
@@ -173,6 +178,11 @@ const I18N = {
         battery_used: 'Batterij gebruikt',
         battery_at_start: 'Bij start',
         battery_at_end: 'Bij eind',
+        seen_parked: 'Laatst geparkeerd gezien',
+        seen_again: 'Weer gezien',
+        time_unknown: 'Tijd onbekend',
+        ride_time_estimated_note: 'De bridge zag de fiets niet vertrekken, dus de starttijd is geschat op basis van de rijtijd.',
+        ride_time_unknown_note: 'De bridge zag vertrek noch aankomst. De rit vond ergens tussen deze twee check-ins plaats; snelheden zijn onbekend.',
         ride_quality_note: 'Snelheid is gemiddeld over het hele venster — korte stops zien we niet. Wordt de fiets tussentijds uit‑ en aangezet, dan resetten de tellers en kan deze rit incompleet zijn.',
 
         settings: 'Instellingen',

@@ -87,6 +87,10 @@ function renderRides() {
         ]),
     ]);
 }
+function rideStartLabel(r) {
+    if (r.timing === 'unknown') return window.bridgeI18n.t('time_unknown');
+    return (r.timing === 'estimated' ? '≈' : '') + fmt.timeOnly(r.start);
+}
 function rideRow(r, last, locale) {
     const used = (r.batteryFrom != null && r.batteryTo != null)
         ? Math.max(0, r.batteryFrom - r.batteryTo) : null;
@@ -98,7 +102,7 @@ function rideRow(r, last, locale) {
                 el('span', { class: 'unit', text: 'km' }),
             ]),
             el('div', { class: 'ride-sub' }, [
-                el('span', { text: fmt.timeOnly(r.start) }),
+                el('span', { text: rideStartLabel(r) }),
                 el('span', { text: '·' }),
                 el('span', { text: fmt.durationMin(r.durationMin, locale) }),
                 r.avgKmh != null ? el('span', { text: '·' }) : null,

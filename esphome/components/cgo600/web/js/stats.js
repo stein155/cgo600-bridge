@@ -1,25 +1,62 @@
 // ─── Aggregation ─────────────────────────────────────────
-function rideStart(r) {
-    // window_start is the departure moment recorded by the firmware (last time
-    // the bike was seen before it dropped out of BLE range). Use it directly —
-    // do NOT estimate from window_end − duration.
-    const start = new Date(r.window_start).getTime();
-    if (!isNaN(start)) return start;
-    return new Date(r.window_end).getTime();
-}
-function rideEnd(r) { return new Date(r.window_end).getTime(); }
-function normalizeRide(r, idx) {
+// A window this much longer than the riding time includes parked time.
+const LONG_WINDOW_SLACK_MS = 20 * MINUTE_MS;
+// The firmware advances window_start on every parked check-in. When it stays
+// this close to the previous ride's end, the bridge never saw the departure.
+const MISSED_DEPARTURE_GAP_MS = 15 * MINUTE_MS;
+
+// window_start is the last check-in before the ride and window_end the first
+// one after it. They are the departure and arrival only when the bridge saw
+// both; timing says how far to trust them:
+//   'observed'  - departure seen (or the window matches the riding time)
+//   'estimated' - departure missed; start is window_end − riding time
+//   'unknown'   - the ride was logged when the bike was switched on (no
+//                 speeds), so the arrival was missed too and the ride took
+//                 place somewhere inside the window
+// Called as rides.map(normalizeRide); rides are newest first.
+function normalizeRide(r, idx, rides) {
+    const windowEnd = new Date(r.window_end).getTime();
+    let windowStart = new Date(r.window_start).getTime();
+    if (isNaN(windowStart)) windowStart = windowEnd;
+    const durationSec = Number(r.ride_duration_sec) || 0;
+    const maxKmh = r.max_speed_kmh != null ? Number(r.max_speed_kmh) : null;
+    const noSpeeds = maxKmh == null || maxKmh <= 0;
+
+    const prev = rides && rides[idx + 1];
+    const prevEnd = prev ? new Date(prev.window_end).getTime() : NaN;
+    const departureMissed = isNaN(prevEnd) || windowStart - prevEnd < MISSED_DEPARTURE_GAP_MS;
+
+    let timing = 'observed', start = windowStart;
+    if (windowEnd - windowStart > durationSec * 1000 + LONG_WINDOW_SLACK_MS) {
+        if (noSpeeds) {
+            timing = 'unknown';
+        } else if (departureMissed) {
+            timing = 'estimated';
+            start = windowEnd - durationSec * 1000;
+        }
+    }
+
+    let batteryFrom = r.battery_start != null ? Number(r.battery_start) : null;
+    let batteryTo = r.battery_end != null ? Number(r.battery_end) : null;
+    // Charged somewhere inside the window: the battery used is unknown.
+    if (batteryFrom != null && batteryTo != null && batteryTo > batteryFrom) {
+        batteryFrom = batteryTo = null;
+    }
+
     return {
         id: r.id || ('ride-' + idx),
         raw: r,
-        start: rideStart(r),
-        end: rideEnd(r),
+        start: start,
+        end: windowEnd,
+        windowStart: windowStart,
+        windowEnd: windowEnd,
+        timing: timing,
         km: Number(r.distance_km) || 0,
-        durationMin: Math.round((Number(r.ride_duration_sec) || 0) / 60),
-        avgKmh: r.avg_speed_kmh != null ? Number(r.avg_speed_kmh) : null,
-        maxKmh: r.max_speed_kmh != null ? Number(r.max_speed_kmh) : null,
-        batteryFrom: r.battery_start != null ? Number(r.battery_start) : null,
-        batteryTo: r.battery_end != null ? Number(r.battery_end) : null,
+        durationMin: Math.round(durationSec / 60),
+        avgKmh: !noSpeeds && r.avg_speed_kmh != null ? Number(r.avg_speed_kmh) : null,
+        maxKmh: noSpeeds ? null : maxKmh,
+        batteryFrom: batteryFrom,
+        batteryTo: batteryTo,
     };
 }
 function lifetime(rides) {
