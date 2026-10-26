@@ -2,7 +2,7 @@
 
 ESP32 firmware, built on [ESPHome](https://esphome.io), that reads live telemetry from a **Tenways CGO600** e-bike over Bluetooth Low Energy and brings it into **Home Assistant**. The bridge also serves its own multilingual web dashboard (installable as a PWA) for live monitoring, light control and a ride history. Once installed, no computer is needed.
 
-> **CGO800 (experimental):** bikes whose display uses the King Meter BLE service, such as the CGO800 Plus, are detected automatically. Their protocol support is based on another bike's capture and has not been confirmed on a CGO800 yet; light control is not available for them. Logs from a CGO800 are very welcome in [issue #2](https://github.com/stein155/cgo600-bridge/issues/2).
+> **CGO800 (experimental):** bikes whose display uses the King Meter BLE service, such as the CGO800 Plus, are detected automatically. Reading data and light control have not been confirmed on a CGO800 yet. Logs from a CGO800 are very welcome in [issue #2](https://github.com/stein155/cgo600-bridge/issues/2).
 
 > "TENWAYS" and "CGO600" are trademarks of TENWAYS. This is an unofficial community project, not affiliated with or endorsed by TENWAYS — use at your own risk.
 
@@ -179,26 +179,27 @@ The checksum is CRC-16/MODBUS (polynomial `0xA001` reflected, initial value `0xF
 
 ### King Meter (CGO800)
 
-Newer displays expose a King Meter service (`43480001-f001-4b49-4e47-204d45544552`) instead of NUS. Requests are written to `43480002-…`; replies arrive as notifications on `43480003-…`. The layout and requests come from [tenways-ble](https://github.com/Styx85/tenways-ble), which captured them from the Tenways app on a Longtail Duo.
+Newer displays expose a King Meter service (`43480001-f001-4b49-4e47-204d45544552`) instead of NUS. Requests are written to `43480002-…`; replies arrive as notifications on `43480003-…`. The Longtail Duo layout comes from [tenways-ble](https://github.com/Styx85/tenways-ble), which captured it from the Tenways app; the CGO800 layout follows how the Tenways app talks to that model.
 
 ```
-[type] 0x00 [len] [cmd] [payload...] [CRC16_hi] [CRC16_lo] 0x45
+[type] 0x00 [len] [count] [payload...] [CRC16] [CRC16] 0x45
 ```
 
-`type` is `0x62` (read) or `0x63` (write) and `len` counts `cmd` and payload. The checksum is the same CRC-16/MODBUS, sent high byte first in both directions. A read request lists keys; the reply carries `[key] [size] [value]` entries with big-endian values.
+`type` is `0x62` (read) or `0x63` (write), `len` counts `count` and the payload, and `count` is the number of keys. A read request lists keys; the reply carries `[key] [size] [value]` entries with big-endian values. A write carries one `[key] [size] [value]` entry. The checksum is the same CRC-16/MODBUS. The Longtail Duo sends it high byte first, the CGO800 low byte first, and a display ignores requests in the wrong order. The bridge picks the layout from the advertised name and tries the other one when the bike does not answer.
 
-| Command | Key | Field | Decoding |
-|---|---|---|---|
-| `0x0B` status | `0x06` | Speed | uint16 ÷ 10 → km/h |
-| | `0x07` | Max speed | uint16 ÷ 10 → km/h |
-| | `0x08` | Average speed | uint16 ÷ 10 → km/h |
-| | `0x09` | Trip distance | uint32 ÷ 10 → km |
-| | `0x0A` | Ride time | uint32 → seconds |
-| | `0x0B` | Remaining range | uint16 → km (any byte ≥ `0x80` = none) |
-| | `0x0C` | Total range (odometer) | uint32 ÷ 10 → km |
-| | `0x0F` | Battery | uint8 → % |
-| | `0x11` | Light (unconfirmed) | uint8 (0 = off) |
-| `0x04` info | `0x70` | Serial number | ASCII string |
+| Key | Field | Decoding |
+|---|---|---|
+| `0x05` | Serial number (CGO800) | ASCII string |
+| `0x06` | Speed | uint16 ÷ 10 → km/h |
+| `0x07` | Max speed | uint16 ÷ 10 → km/h |
+| `0x08` | Average speed | uint16 ÷ 10 → km/h |
+| `0x09` | Trip distance | uint32 ÷ 10 → km |
+| `0x0A` | Ride time | uint32 → seconds |
+| `0x0B` | Remaining range | uint16 → km (any byte ≥ `0x80` = none) |
+| `0x0C` | Total range (odometer) | uint32 ÷ 10 → km |
+| `0x0F` | Battery | uint8 → % |
+| `0x11` | Light | uint8 (0 = off, 1 = on); written to switch the light |
+| `0x70` | Serial number (Longtail Duo) | ASCII string |
 
 The first 20 requests and notifications of every King Meter connection are logged at DEBUG, and a summary of the traffic (requests, notifications, frames, CRC errors, skipped bytes) every 30 s. The bridge also listens on the service's other notify characteristics (`0xFF03`, `0xFF04` on the CGO800) and logs what arrives there. Add `logger: logs: cgo: VERBOSE` to log every raw notification.
 

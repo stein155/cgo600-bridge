@@ -24,6 +24,7 @@ static constexpr uint32_t CCCD_CONFIRM_TIMEOUT_MS = 1000;
 // every connection at DEBUG so a default log shows it, the rest at VERBOSE.
 static constexpr uint32_t KM_DEBUG_LOGGED = 20;
 static constexpr uint32_t KM_SUMMARY_INTERVAL_MS = 30000;
+static constexpr uint8_t KM_SWITCH_AFTER_POLLS = 5;
 static constexpr size_t MAX_LOGGED_BYTES = 64;
 // Connection parameters (units: 1.25 ms, 10 ms). Connect with a short interval
 // so service discovery is quick: the bike is often switched off seconds after
@@ -127,6 +128,7 @@ bool CGOComponent::parse_device(const espbt::ESPBTDevice &device) {
         return false;
 
     ESP_LOGI(TAG, "Found bike '%s' [%s], connecting", device.get_name().c_str(), device.address_str().c_str());
+    this->bike_name_ = device.get_name();
     this->set_address(device.address_uint64());
     this->set_remote_addr_type(device.get_address_type());
     this->set_state(espbt::ClientState::DISCOVERED);
@@ -291,6 +293,7 @@ void CGOComponent::on_services_ready_() {
         rx = this->get_characteristic(NUS_SERVICE_UUID, NUS_RX_UUID);
     } else if (this->get_service(KM_SERVICE_UUID) != nullptr) {
         this->transport_ = Transport::KING_METER;
+        this->km_profile_ = &protocol::km::profile_for(this->bike_name_.c_str());
         tx = this->get_characteristic(KM_SERVICE_UUID, KM_NOTIFY_UUID);
         rx = this->get_characteristic(KM_SERVICE_UUID, KM_WRITE_UUID);
     }
@@ -300,8 +303,11 @@ void CGOComponent::on_services_ready_() {
         this->disconnect();
         return;
     }
-    ESP_LOGI(TAG, "Using the %s protocol",
-             this->transport_ == Transport::KING_METER ? "King Meter" : "Nordic UART (CGO600)");
+    if (this->transport_ == Transport::KING_METER) {
+        ESP_LOGI(TAG, "Using the King Meter protocol (%s layout)", this->km_profile_->name);
+    } else {
+        ESP_LOGI(TAG, "Using the Nordic UART protocol (CGO600)");
+    }
     this->tx_handle_ = tx->handle;
     this->rx_handle_ = rx->handle;
     this->update_conn_params_(RELAXED_MIN_INTERVAL, RELAXED_MAX_INTERVAL, CONN_LATENCY, CONN_SUPERVISION_TIMEOUT,
@@ -443,7 +449,7 @@ void CGOComponent::request_static_fields_() {
     this->last_static_request_ = millis();
     bool ok;
     if (this->transport_ == Transport::KING_METER) {
-        ok = this->write_(protocol::km::INFO_REQUEST);
+        ok = this->write_km_read_(this->km_profile_->info_keys, this->km_profile_->info_count);
     } else {
         static const uint8_t FIELDS[] = {protocol::FIELD_SN};
         uint8_t cmd[sizeof(FIELDS) + 5];
@@ -455,10 +461,30 @@ void CGOComponent::request_static_fields_() {
 }
 
 void CGOComponent::poll_() {
-    const auto &cmd =
-        this->transport_ == Transport::KING_METER ? protocol::km::STATUS_REQUEST : protocol::READ_DATA_CMD;
-    if (!this->write_(cmd))
+    bool ok;
+    if (this->transport_ == Transport::KING_METER) {
+        // A display ignores requests in the other layout, so a bike whose name
+        // did not pick the right one (or that advertises none) gets both tried.
+        if (this->km_parser_.frames() == 0 && ++this->km_unanswered_polls_ > KM_SWITCH_AFTER_POLLS) {
+            this->km_unanswered_polls_ = 0;
+            this->km_profile_ = this->km_profile_ == &protocol::km::CGO800_PROFILE ? &protocol::km::LONGTAIL_PROFILE
+                                                                                   : &protocol::km::CGO800_PROFILE;
+            ESP_LOGI(TAG, "No reply from the bike, trying the %s layout", this->km_profile_->name);
+            this->request_static_fields_();
+        }
+        ok = this->write_km_read_(this->km_profile_->status_keys, this->km_profile_->status_count);
+    } else {
+        ok = this->write_(protocol::READ_DATA_CMD);
+    }
+    if (!ok)
         ESP_LOGW(TAG, "Poll write failed");
+}
+
+bool CGOComponent::write_km_read_(const uint8_t *keys, uint8_t count) {
+    uint8_t cmd[MAX_WRITE_LEN];
+    if (count + protocol::km::OVERHEAD + 1 > sizeof(cmd))
+        return false;
+    return this->write_(cmd, protocol::km::build_read(cmd, keys, count, this->km_profile_->crc_low_first));
 }
 
 bool CGOComponent::write_(const protocol::Command &cmd) { return this->write_(cmd.data, cmd.len); }
@@ -490,12 +516,15 @@ bool CGOComponent::set_light(bool on) {
         ESP_LOGW(TAG, "Light command ignored: bike not connected");
         return false;
     }
+    bool ok;
     if (this->transport_ == Transport::KING_METER) {
-        // The light command of the King Meter protocol is not known yet.
-        ESP_LOGW(TAG, "Light control is not supported on this bike");
-        return false;
+        uint8_t cmd[10];
+        ok = this->write_(cmd, protocol::km::build_write(cmd, protocol::km::KEY_LIGHT, on ? 1 : 0,
+                                                         this->km_profile_->crc_low_first));
+    } else {
+        ok = this->write_(on ? protocol::LIGHT_ON_CMD : protocol::LIGHT_OFF_CMD);
     }
-    if (!this->write_(on ? protocol::LIGHT_ON_CMD : protocol::LIGHT_OFF_CMD)) {
+    if (!ok) {
         ESP_LOGW(TAG, "Light write failed");
         return false;
     }
@@ -546,6 +575,8 @@ void CGOComponent::reset_session_() {
     }
     this->phase_ = Phase::IDLE;
     this->transport_ = Transport::NONE;
+    this->km_profile_ = nullptr;
+    this->km_unanswered_polls_ = 0;
     this->handshake_step_ = 0;
     this->tx_handle_ = 0;
     this->rx_handle_ = 0;

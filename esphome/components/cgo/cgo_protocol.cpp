@@ -198,14 +198,54 @@ bool FrameParser::feed(BikeState &state, const uint8_t *data, size_t len, bool &
 
 namespace km {
 
-// Pre-built read requests, copied from the tenways-ble capture.
-static const uint8_t STATUS_REQUEST_BYTES[] = {0x62, 0x00, 0x0C, 0x0B, 0x06, 0x07, 0x08, 0x09, 0x11,
-                                               0x0A, 0x0B, 0x0C, 0x0F, 0x23, 0x4F, 0x84, 0x91, 0x45};
-static const uint8_t INFO_REQUEST_BYTES[] = {0x62, 0x00, 0x05, 0x04, 0x04, 0x05, 0x4F, 0x70, 0x8A, 0x12, 0x45};
+static const uint8_t LONGTAIL_STATUS_KEYS[] = {0x06, 0x07, 0x08, 0x09, 0x11, 0x0A, 0x0B, 0x0C, 0x0F, 0x23, 0x4F};
+static const uint8_t LONGTAIL_INFO_KEYS[] = {0x04, 0x05, 0x4F, 0x70};
+static const uint8_t CGO800_STATUS_KEYS[] = {0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0F, 0x11, 0x23};
+static const uint8_t CGO800_INFO_KEYS[] = {0x04, 0x05};
 
-const Command STATUS_REQUEST{STATUS_REQUEST_BYTES, sizeof(STATUS_REQUEST_BYTES)};
-const Command INFO_REQUEST{INFO_REQUEST_BYTES, sizeof(INFO_REQUEST_BYTES)};
+const Profile LONGTAIL_PROFILE{"Longtail Duo",
+                               LONGTAIL_STATUS_KEYS,
+                               sizeof(LONGTAIL_STATUS_KEYS),
+                               LONGTAIL_INFO_KEYS,
+                               sizeof(LONGTAIL_INFO_KEYS),
+                               false};
+const Profile CGO800_PROFILE{"CGO800",
+                             CGO800_STATUS_KEYS,
+                             sizeof(CGO800_STATUS_KEYS),
+                             CGO800_INFO_KEYS,
+                             sizeof(CGO800_INFO_KEYS),
+                             true};
 
+const Profile &profile_for(const char *device_name) {
+    return strncmp(device_name, "CGO800", 6) == 0 ? CGO800_PROFILE : LONGTAIL_PROFILE;
+}
+
+static size_t finish_frame(uint8_t *out, size_t body_len, bool crc_low_first) {
+    const uint16_t crc = crc16(out, body_len);
+    out[body_len] = crc_low_first ? crc & 0xFF : crc >> 8;
+    out[body_len + 1] = crc_low_first ? crc >> 8 : crc & 0xFF;
+    out[body_len + 2] = END_BYTE;
+    return body_len + 3;
+}
+
+size_t build_read(uint8_t *out, const uint8_t *keys, uint8_t count, bool crc_low_first) {
+    out[0] = TYPE_READ;
+    out[1] = HEADER_BYTE;
+    out[2] = count + 1;
+    out[3] = count;
+    memcpy(out + 4, keys, count);
+    return finish_frame(out, 4 + count, crc_low_first);
+}
+
+size_t build_write(uint8_t *out, uint8_t key, uint8_t value, bool crc_low_first) {
+    const uint8_t body[] = {TYPE_WRITE, HEADER_BYTE, 4, 1, key, 1, value};
+    memcpy(out, body, sizeof(body));
+    return finish_frame(out, sizeof(body), crc_low_first);
+}
+
+// The serial number on the CGO800. The Longtail Duo reports another serial
+// here and the one we expose under 0x70, which its reply lists later.
+static constexpr uint8_t KEY_SERIAL_CGO800 = 0x05;
 static constexpr uint8_t KEY_SPEED = 0x06;
 static constexpr uint8_t KEY_MAX_SPEED = 0x07;
 static constexpr uint8_t KEY_AVG_SPEED = 0x08;
@@ -214,19 +254,16 @@ static constexpr uint8_t KEY_RIDE_TIME = 0x0A;
 static constexpr uint8_t KEY_REMAINING_RANGE = 0x0B;
 static constexpr uint8_t KEY_ODOMETER = 0x0C;
 static constexpr uint8_t KEY_BATTERY = 0x0F;
-// Follows the light on the Longtail Duo (0 = off); "on" is not yet confirmed.
-static constexpr uint8_t KEY_LIGHT = 0x11;
 static constexpr uint8_t KEY_SERIAL = 0x70;
 
-// Keys are scoped to their command, and several collide with CGO600 field IDs
-// (0x11 is the light here but the speed on the CGO600), so translate them to
-// the CGO600 IDs before decoding. Returns 0 for keys we do not decode.
-static uint8_t to_field_id(uint8_t cmd, uint8_t key) {
-    if (cmd == CMD_INFO)
-        return key == KEY_SERIAL ? FIELD_SN : 0;
-    if (cmd != CMD_STATUS)
-        return 0;
+// Several keys collide with CGO600 field IDs (0x11 is the light here but the
+// speed on the CGO600), so translate them to the CGO600 IDs before decoding.
+// Returns 0 for keys we do not decode.
+static uint8_t to_field_id(uint8_t key) {
     switch (key) {
+        case KEY_SERIAL_CGO800:
+        case KEY_SERIAL:
+            return FIELD_SN;
         case KEY_SPEED:
             return FIELD_SPEED;
         case KEY_MAX_SPEED:
@@ -323,15 +360,16 @@ bool FrameParser::feed(BikeState &state, const uint8_t *data, size_t len, bool &
             continue;
         }
 
-        const uint16_t expected = ((uint16_t) frame[frame_len - 3] << 8) | frame[frame_len - 2];
-        if (crc16(frame, frame_len - 3) != expected) {
+        const uint16_t crc = crc16(frame, frame_len - 3);
+        const uint16_t high_first = ((uint16_t) frame[frame_len - 3] << 8) | frame[frame_len - 2];
+        const uint16_t low_first = ((uint16_t) frame[frame_len - 2] << 8) | frame[frame_len - 3];
+        if (crc != high_first && crc != low_first) {
             ++bad_crc;
         } else if (frame[0] != TYPE_READ) {
             ++this->frames_;
             ++unhandled;
         } else {
             ++this->frames_;
-            const uint8_t cmd = frame[3];
             const size_t payload_end = frame_len - 3;
             size_t pos = 4;
             bool decoded = false;
@@ -340,7 +378,7 @@ bool FrameParser::feed(BikeState &state, const uint8_t *data, size_t len, bool &
                 const uint8_t size = frame[pos++];
                 if (pos + size > payload_end)
                     break;
-                const uint8_t field_id = to_field_id(cmd, key);
+                const uint8_t field_id = to_field_id(key);
                 if (field_id == FIELD_TRIP_DISTANCE || field_id == FIELD_TRIP_DURATION)
                     saw_trip = true;
                 if (field_id != 0 && decode_km_field(state, field_id, frame + pos, size)) {
