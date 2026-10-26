@@ -78,29 +78,45 @@ class FrameParser {
 
 // King Meter transport used by newer Tenways displays such as the CGO800.
 // Frames in both directions:
-//   [type][0x00][len][cmd][payload...][crc_hi][crc_lo][0x45]
-// type is 0x62 (read) or 0x63 (write), len counts cmd + payload, and the
-// CRC-16/MODBUS over type..payload is sent high byte first. A read request
-// lists field keys; the reply carries [key][size][value] entries with
-// big-endian values. Layout and requests come from the tenways-ble project's
-// capture of the Tenways app on a Longtail Duo (MIT,
-// https://github.com/Styx85/tenways-ble).
+//   [type][0x00][len][count][payload...][crc][crc][0x45]
+// type is 0x62 (read) or 0x63 (write), len counts the count byte + payload,
+// and count is the number of keys. A read request lists keys; the reply
+// carries [key][size][value] entries with big-endian values. The checksum is
+// CRC-16/MODBUS over type..payload. The Longtail Duo sends it high byte first
+// (tenways-ble, MIT, https://github.com/Styx85/tenways-ble), the CGO800 low
+// byte first.
 namespace km {
 
 static constexpr uint8_t TYPE_READ = 0x62;
 static constexpr uint8_t TYPE_WRITE = 0x63;
 static constexpr uint8_t HEADER_BYTE = 0x00;
 static constexpr uint8_t END_BYTE = 0x45;
-static constexpr size_t OVERHEAD = 6;  // type, header, len, crc_hi, crc_lo, end
+static constexpr size_t OVERHEAD = 6;  // type, header, len, crc, crc, end
+static constexpr uint8_t KEY_LIGHT = 0x11;
 
-static constexpr uint8_t CMD_INFO = 0x04;
-static constexpr uint8_t CMD_STATUS = 0x0B;
+// What a display is asked for and how its requests are checksummed.
+struct Profile {
+    const char *name;
+    const uint8_t *status_keys;
+    uint8_t status_count;
+    const uint8_t *info_keys;
+    uint8_t info_count;
+    bool crc_low_first;
+};
 
-extern const Command STATUS_REQUEST;
-extern const Command INFO_REQUEST;
+extern const Profile LONGTAIL_PROFILE;
+extern const Profile CGO800_PROFILE;
 
-// Reassembles notification chunks into King Meter frames and decodes status
-// and info replies into the shared BikeState.
+// Picks the profile from the advertised name; other names get the Longtail Duo's.
+const Profile &profile_for(const char *device_name);
+
+// Builds a read request for keys; out must hold count + OVERHEAD + 1 bytes.
+size_t build_read(uint8_t *out, const uint8_t *keys, uint8_t count, bool crc_low_first);
+// Builds a write that sets a one-byte key; out must hold 10 bytes.
+size_t build_write(uint8_t *out, uint8_t key, uint8_t value, bool crc_low_first);
+
+// Reassembles notification chunks into King Meter frames and decodes their
+// keys into the shared BikeState. Frames pass with either CRC byte order.
 class FrameParser {
  public:
     static constexpr size_t BUFFER_SIZE = 4 * (0xFF + OVERHEAD);

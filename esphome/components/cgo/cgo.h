@@ -87,6 +87,7 @@ class CGOComponent : public esp32_ble_client::BLEClientBase {
     void run_handshake_step_(uint32_t now);
     bool write_(const protocol::Command &cmd);
     bool write_(const uint8_t *data, size_t len);
+    bool write_km_read_(const uint8_t *keys, uint8_t count);
     void request_static_fields_();
     void poll_();
     void reset_session_();
@@ -99,6 +100,8 @@ class CGOComponent : public esp32_ble_client::BLEClientBase {
 
     std::vector<std::string> device_names_;
     std::string device_name_;
+    // Advertised name of the bike being connected; picks the King Meter profile.
+    std::string bike_name_;
     uint32_t poll_interval_ms_{1000};
 
     Phase phase_{Phase::IDLE};
@@ -123,6 +126,8 @@ class CGOComponent : public esp32_ble_client::BLEClientBase {
         uint32_t unhandled{0};
     };
     KmStats km_stats_;
+    const protocol::km::Profile *km_profile_{nullptr};
+    uint8_t km_unanswered_polls_{0};
     uint32_t last_km_summary_{0};
     // Other notify characteristics in the King Meter service (0xFF03, 0xFF04
     // on the CGO800).
