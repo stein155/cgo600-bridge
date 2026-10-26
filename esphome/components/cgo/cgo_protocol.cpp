@@ -209,8 +209,10 @@ const Command INFO_REQUEST{INFO_REQUEST_BYTES, sizeof(INFO_REQUEST_BYTES)};
 static constexpr uint8_t KEY_SPEED = 0x06;
 static constexpr uint8_t KEY_MAX_SPEED = 0x07;
 static constexpr uint8_t KEY_AVG_SPEED = 0x08;
+static constexpr uint8_t KEY_TRIP_DISTANCE = 0x09;
 static constexpr uint8_t KEY_RIDE_TIME = 0x0A;
-static constexpr uint8_t KEY_TRIP_DISTANCE = 0x0C;
+static constexpr uint8_t KEY_REMAINING_RANGE = 0x0B;
+static constexpr uint8_t KEY_ODOMETER = 0x0C;
 static constexpr uint8_t KEY_BATTERY = 0x0F;
 // Follows the light on the Longtail Duo (0 = off); "on" is not yet confirmed.
 static constexpr uint8_t KEY_LIGHT = 0x11;
@@ -235,6 +237,10 @@ static uint8_t to_field_id(uint8_t cmd, uint8_t key) {
             return FIELD_TRIP_DURATION;
         case KEY_TRIP_DISTANCE:
             return FIELD_TRIP_DISTANCE;
+        case KEY_REMAINING_RANGE:
+            return FIELD_REMAINING_RANGE;
+        case KEY_ODOMETER:
+            return FIELD_TOTAL_RANGE;
         case KEY_BATTERY:
             return FIELD_BATTERY;
         case KEY_LIGHT:
@@ -244,15 +250,35 @@ static uint8_t to_field_id(uint8_t cmd, uint8_t key) {
     }
 }
 
+// The remaining range is the only King Meter value encoded differently from
+// the CGO600 field it maps to.
+static bool decode_km_field(BikeState &state, uint8_t field_id, const uint8_t *data, uint8_t len) {
+    if (field_id != FIELD_REMAINING_RANGE)
+        return decode_field(state, field_id, data, len);
+    if (len == 0)
+        return false;
+    // Whole kilometres. The app treats any byte >= 0x80 as no range, which the
+    // display reports with assist level 0 (0x028F).
+    for (uint8_t i = 0; i < len; i++) {
+        if (data[i] >= 0x80)
+            return false;
+    }
+    state.remaining_range_km = (float) int_be(data, len);
+    return true;
+}
+
 static bool is_frame_type(uint8_t b) { return b == TYPE_READ || b == TYPE_WRITE; }
 
 void FrameParser::append_(const uint8_t *data, size_t len) {
     // Unlike the CGO600 parser, keep the start of the buffer: a frame is only
     // found from its first byte. Overflow means garbage, so start over.
     if (len > BUFFER_SIZE - this->len_) {
+        this->skipped_bytes_ += this->len_;
         this->len_ = 0;
-        if (len > BUFFER_SIZE)
+        if (len > BUFFER_SIZE) {
+            this->skipped_bytes_ += len;
             return;
+        }
     }
     memcpy(this->buffer_ + this->len_, data, len);
     this->len_ += len;
@@ -270,6 +296,7 @@ void FrameParser::resync_() {
     if (start > 0) {
         memmove(this->buffer_, this->buffer_ + start, this->len_ - start);
         this->len_ -= start;
+        this->skipped_bytes_ += start;
     }
 }
 
@@ -292,6 +319,7 @@ bool FrameParser::feed(BikeState &state, const uint8_t *data, size_t len, bool &
             // Wrong length byte: this was not a frame start, search again.
             memmove(this->buffer_, this->buffer_ + 1, this->len_ - 1);
             --this->len_;
+            ++this->skipped_bytes_;
             continue;
         }
 
@@ -299,8 +327,10 @@ bool FrameParser::feed(BikeState &state, const uint8_t *data, size_t len, bool &
         if (crc16(frame, frame_len - 3) != expected) {
             ++bad_crc;
         } else if (frame[0] != TYPE_READ) {
+            ++this->frames_;
             ++unhandled;
         } else {
+            ++this->frames_;
             const uint8_t cmd = frame[3];
             const size_t payload_end = frame_len - 3;
             size_t pos = 4;
@@ -313,7 +343,7 @@ bool FrameParser::feed(BikeState &state, const uint8_t *data, size_t len, bool &
                 const uint8_t field_id = to_field_id(cmd, key);
                 if (field_id == FIELD_TRIP_DISTANCE || field_id == FIELD_TRIP_DURATION)
                     saw_trip = true;
-                if (field_id != 0 && decode_field(state, field_id, frame + pos, size)) {
+                if (field_id != 0 && decode_km_field(state, field_id, frame + pos, size)) {
                     changed = true;
                     decoded = true;
                 }

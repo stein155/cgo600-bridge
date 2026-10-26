@@ -80,7 +80,10 @@ class CGOComponent : public esp32_ble_client::BLEClientBase {
 
     bool matches_(const espbt::ESPBTDevice &device) const;
     void on_services_ready_();
+    void subscribe_extra_km_notify_();
     void log_services_();
+    void log_bytes_(const char *what, uint16_t handle, const uint8_t *data, size_t len, bool debug);
+    void log_km_summary_();
     void run_handshake_step_(uint32_t now);
     bool write_(const protocol::Command &cmd);
     bool write_(const uint8_t *data, size_t len);
@@ -106,7 +109,24 @@ class CGOComponent : public esp32_ble_client::BLEClientBase {
     uint32_t last_poll_{0};
     uint32_t last_static_request_{0};
     uint32_t bad_crc_count_{0};
-    uint32_t unhandled_frame_count_{0};
+    // Handshake waits until the bike confirms the notification subscription.
+    uint16_t cccd_handle_{0};
+    bool cccd_confirmed_{false};
+    uint32_t cccd_deadline_{0};
+    // Per-connection King Meter traffic, logged as a periodic summary.
+    struct KmStats {
+        uint32_t requests{0};
+        uint32_t notifications{0};
+        uint32_t notification_bytes{0};
+        uint32_t extra_notifications{0};
+        uint32_t bad_crc{0};
+        uint32_t unhandled{0};
+    };
+    KmStats km_stats_;
+    uint32_t last_km_summary_{0};
+    // Other notify characteristics in the King Meter service (0xFF03, 0xFF04
+    // on the CGO800).
+    uint16_t extra_notify_handles_[2]{};
     // After a light command, light reports that still show the old state are
     // ignored until this deadline; the bike applies the change with a delay.
     uint32_t light_pending_until_{0};

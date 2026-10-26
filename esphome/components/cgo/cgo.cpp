@@ -19,6 +19,12 @@ static constexpr uint32_t HANDSHAKE_STEP_MS = 120;
 static constexpr uint32_t STATIC_REQUEST_INTERVAL_MS = 15000;
 static constexpr size_t MAX_WRITE_LEN = 32;
 static constexpr uint32_t LIGHT_CONFIRM_WINDOW_MS = 2000;
+static constexpr uint32_t CCCD_CONFIRM_TIMEOUT_MS = 1000;
+// King Meter support is unconfirmed on most bikes: log the first traffic of
+// every connection at DEBUG so a default log shows it, the rest at VERBOSE.
+static constexpr uint32_t KM_DEBUG_LOGGED = 20;
+static constexpr uint32_t KM_SUMMARY_INTERVAL_MS = 30000;
+static constexpr size_t MAX_LOGGED_BYTES = 64;
 // Connection parameters (units: 1.25 ms, 10 ms). Connect with a short interval
 // so service discovery is quick: the bike is often switched off seconds after
 // arriving, and a 50 ms interval stretched discovery to over 10 s. Once the
@@ -49,6 +55,8 @@ static const espbt::ESPBTUUID NUS_TX_UUID = espbt::ESPBTUUID::from_raw("6e400003
 static const espbt::ESPBTUUID KM_SERVICE_UUID = espbt::ESPBTUUID::from_raw("43480001-f001-4b49-4e47-204d45544552");
 static const espbt::ESPBTUUID KM_WRITE_UUID = espbt::ESPBTUUID::from_raw("43480002-f001-4b49-4e47-204d45544552");
 static const espbt::ESPBTUUID KM_NOTIFY_UUID = espbt::ESPBTUUID::from_raw("43480003-f001-4b49-4e47-204d45544552");
+static const espbt::ESPBTUUID KM_EXTRA_NOTIFY_UUIDS[] = {espbt::ESPBTUUID::from_uint16(0xFF03),
+                                                          espbt::ESPBTUUID::from_uint16(0xFF04)};
 
 static bool contains_ignore_case(const std::string &haystack, const std::string &needle) {
     if (needle.empty() || needle.size() > haystack.size())
@@ -158,7 +166,7 @@ bool CGOComponent::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t
             this->on_services_ready_();
             break;
 
-        case ESP_GATTC_REG_FOR_NOTIFY_EVT:
+        case ESP_GATTC_REG_FOR_NOTIFY_EVT: {
             if (param->reg_for_notify.handle != this->tx_handle_)
                 break;
             if (param->reg_for_notify.status != ESP_GATT_OK) {
@@ -171,33 +179,77 @@ bool CGOComponent::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t
             this->phase_ = Phase::HANDSHAKE;
             this->handshake_step_ = 0;
             this->next_step_at_ = millis() + SUBSCRIBE_SETTLE_MS;
+            // The base class enables notifications by writing this descriptor.
+            auto *cccd = this->get_config_descriptor(this->tx_handle_);
+            this->cccd_handle_ = cccd != nullptr ? cccd->handle : 0;
+            this->cccd_confirmed_ = this->cccd_handle_ == 0;
+            this->cccd_deadline_ = millis() + CCCD_CONFIRM_TIMEOUT_MS;
+            if (this->transport_ == Transport::KING_METER)
+                this->subscribe_extra_km_notify_();
             this->update_ble_status_();
+            break;
+        }
+
+        case ESP_GATTC_WRITE_DESCR_EVT:
+            if (this->cccd_handle_ == 0 || param->write.handle != this->cccd_handle_) {
+                if (param->write.status != ESP_GATT_OK) {
+                    ESP_LOGW(TAG, "Descriptor write 0x%04X failed (status=0x%02X)", param->write.handle,
+                             param->write.status);
+                }
+                break;
+            }
+            if (param->write.status == ESP_GATT_OK) {
+                ESP_LOGD(TAG, "Notifications enabled");
+            } else {
+                ESP_LOGW(TAG, "Enabling notifications failed (status=0x%02X); the bike will not send data",
+                         param->write.status);
+            }
+            this->cccd_confirmed_ = true;
+            break;
+
+        case ESP_GATTC_WRITE_CHAR_EVT:
+            if (param->write.handle == this->rx_handle_ && param->write.status != ESP_GATT_OK)
+                ESP_LOGW(TAG, "Bike rejected a write (status=0x%02X)", param->write.status);
             break;
 
         case ESP_GATTC_NOTIFY_EVT: {
-            if (param->notify.handle != this->tx_handle_)
+            const bool km = this->transport_ == Transport::KING_METER;
+            auto &stats = this->km_stats_;
+            if (param->notify.handle != this->tx_handle_) {
+                for (const uint16_t handle : this->extra_notify_handles_) {
+                    if (handle != 0 && handle == param->notify.handle) {
+                        ++stats.extra_notifications;
+                        this->log_bytes_("RX on extra characteristic", handle, param->notify.value,
+                                         param->notify.value_len, stats.extra_notifications <= KM_DEBUG_LOGGED);
+                    }
+                }
                 break;
-#if ESPHOME_LOG_LEVEL >= ESPHOME_LOG_LEVEL_VERBOSE
-            char hex[format_hex_pretty_size(64)];
-            ESP_LOGV(TAG, "RX %u bytes: %s", param->notify.value_len,
-                     format_hex_pretty_to(hex, param->notify.value, std::min<size_t>(param->notify.value_len, 64)));
-#endif
+            }
+            if (km) {
+                ++stats.notifications;
+                stats.notification_bytes += param->notify.value_len;
+            }
+            this->log_bytes_("RX", param->notify.handle, param->notify.value, param->notify.value_len,
+                             km && stats.notifications <= KM_DEBUG_LOGGED);
             bool saw_trip = false;
             bool changed;
-            const uint32_t unhandled_before = this->unhandled_frame_count_;
+            const uint32_t bad_crc_before = stats.bad_crc;
+            const uint32_t unhandled_before = stats.unhandled;
             {
                 LockGuard guard(this->state_mutex_);
-                if (this->transport_ == Transport::KING_METER) {
+                if (km) {
                     changed = this->km_parser_.feed(this->state_, param->notify.value, param->notify.value_len,
-                                                    saw_trip, this->bad_crc_count_, this->unhandled_frame_count_);
+                                                    saw_trip, stats.bad_crc, stats.unhandled);
                 } else {
                     changed = this->parser_.feed(this->state_, param->notify.value, param->notify.value_len,
                                                  saw_trip, this->bad_crc_count_);
                 }
             }
-            if (this->unhandled_frame_count_ != unhandled_before)
-                ESP_LOGD(TAG, "Received a frame without known fields (%u so far)",
-                         (unsigned) this->unhandled_frame_count_);
+            if (stats.bad_crc != bad_crc_before)
+                ESP_LOGD(TAG, "Frame failed the CRC check (%u this connection)", (unsigned) stats.bad_crc);
+            if (stats.unhandled != unhandled_before)
+                ESP_LOGD(TAG, "Received a frame without known fields (%u this connection)",
+                         (unsigned) stats.unhandled);
             if (changed) {
                 if (this->connect_started_ms_ != 0) {
                     ESP_LOGI(TAG, "First data %u ms after connecting", (unsigned) (millis() - this->connect_started_ms_));
@@ -262,6 +314,52 @@ void CGOComponent::on_services_ready_() {
     }
 }
 
+// Subscribes to the other notify characteristics of the King Meter service.
+// Nothing is decoded from them; they are logged in case the bike answers there.
+void CGOComponent::subscribe_extra_km_notify_() {
+    size_t count = 0;
+    for (const auto &uuid : KM_EXTRA_NOTIFY_UUIDS) {
+        auto *chr = this->get_characteristic(KM_SERVICE_UUID, uuid);
+        if (chr == nullptr ||
+            (chr->properties & (ESP_GATT_CHAR_PROP_BIT_NOTIFY | ESP_GATT_CHAR_PROP_BIT_INDICATE)) == 0)
+            continue;
+        if (esp_ble_gattc_register_for_notify(this->gattc_if_, this->remote_bda_, chr->handle) != ESP_OK) {
+            ESP_LOGW(TAG, "register_for_notify failed for handle 0x%04X", chr->handle);
+            continue;
+        }
+        ESP_LOGD(TAG, "Also listening on characteristic 0x%04X (handle 0x%04X)", uuid.get_uuid().uuid.uuid16,
+                 chr->handle);
+        this->extra_notify_handles_[count++] = chr->handle;
+    }
+}
+
+void CGOComponent::log_bytes_(const char *what, uint16_t handle, const uint8_t *data, size_t len, bool debug) {
+#if ESPHOME_LOG_LEVEL < ESPHOME_LOG_LEVEL_VERBOSE
+    if (!debug)
+        return;
+#endif
+    char hex[format_hex_pretty_size(MAX_LOGGED_BYTES)];
+    format_hex_pretty_to(hex, data, std::min(len, MAX_LOGGED_BYTES));
+    if (debug) {
+        ESP_LOGD(TAG, "%s 0x%04X, %u bytes: %s", what, handle, (unsigned) len, hex);
+    } else {
+        ESP_LOGV(TAG, "%s 0x%04X, %u bytes: %s", what, handle, (unsigned) len, hex);
+    }
+}
+
+void CGOComponent::log_km_summary_() {
+    this->last_km_summary_ = millis();
+    const auto &s = this->km_stats_;
+    ESP_LOGI(TAG,
+             "King Meter: %u requests, %u notifications (%u bytes), %u frames, %u bad CRC, %u unhandled, "
+             "%u bytes skipped, %u notifications on extra characteristics",
+             (unsigned) s.requests, (unsigned) s.notifications, (unsigned) s.notification_bytes,
+             (unsigned) this->km_parser_.frames(), (unsigned) s.bad_crc, (unsigned) s.unhandled,
+             (unsigned) this->km_parser_.skipped_bytes(), (unsigned) s.extra_notifications);
+    if (s.requests > 0 && s.notifications == 0 && s.extra_notifications == 0)
+        ESP_LOGW(TAG, "The bike has not sent any notification yet");
+}
+
 // Lists what the bike offers, so a log from an unsupported model shows which
 // service it uses.
 void CGOComponent::log_services_() {
@@ -282,6 +380,8 @@ void CGOComponent::loop() {
     if (this->phase_ == Phase::HANDSHAKE) {
         this->run_handshake_step_(now);
     } else if (this->phase_ == Phase::POLLING) {
+        if (this->transport_ == Transport::KING_METER && now - this->last_km_summary_ >= KM_SUMMARY_INTERVAL_MS)
+            this->log_km_summary_();
         if (now - this->last_poll_ >= this->poll_interval_ms_) {
             this->last_poll_ = now;
             this->poll_();
@@ -297,6 +397,12 @@ void CGOComponent::loop() {
 // Same sequence and spacing as the standalone firmware's runHandshake(), but
 // non-blocking: one step per HANDSHAKE_STEP_MS from loop().
 void CGOComponent::run_handshake_step_(uint32_t now) {
+    if (!this->cccd_confirmed_) {
+        if ((int32_t) (now - this->cccd_deadline_) < 0)
+            return;
+        ESP_LOGW(TAG, "Bike did not confirm the notification subscription, continuing");
+        this->cccd_confirmed_ = true;
+    }
     if ((int32_t) (now - this->next_step_at_) < 0)
         return;
 
@@ -323,6 +429,7 @@ void CGOComponent::run_handshake_step_(uint32_t now) {
     this->request_static_fields_();
     this->phase_ = Phase::POLLING;
     this->last_poll_ = now;
+    this->last_km_summary_ = now;
     ESP_LOGI(TAG, "Handshake complete, polling every %u ms", (unsigned) this->poll_interval_ms_);
     const uint32_t connected_at = epoch_now();
     if (connected_at != 0) {
@@ -371,6 +478,10 @@ bool CGOComponent::write_(const uint8_t *data, size_t len) {
         err = esp_ble_gattc_write_char(this->gattc_if_, this->conn_id_, this->rx_handle_, len, buf,
                                        ESP_GATT_WRITE_TYPE_RSP, ESP_GATT_AUTH_REQ_NONE);
     }
+    if (err == ESP_OK && this->transport_ == Transport::KING_METER) {
+        ++this->km_stats_.requests;
+        this->log_bytes_("TX", this->rx_handle_, data, len, this->km_stats_.requests <= KM_DEBUG_LOGGED);
+    }
     return err == ESP_OK;
 }
 
@@ -418,6 +529,8 @@ void CGOComponent::resume_scanning_() {
 
 void CGOComponent::reset_session_() {
     this->resume_scanning_();
+    if (this->transport_ == Transport::KING_METER && this->phase_ != Phase::IDLE)
+        this->log_km_summary_();
     if (this->phase_ == Phase::POLLING) {
         // Keep the last readings, but a speed from before the bike left is no
         // longer current.
@@ -436,6 +549,11 @@ void CGOComponent::reset_session_() {
     this->handshake_step_ = 0;
     this->tx_handle_ = 0;
     this->rx_handle_ = 0;
+    this->cccd_handle_ = 0;
+    this->cccd_confirmed_ = false;
+    this->km_stats_ = {};
+    for (auto &handle : this->extra_notify_handles_)
+        handle = 0;
     this->parser_.reset();
     this->km_parser_.reset();
 }
