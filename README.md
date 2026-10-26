@@ -192,13 +192,15 @@ Newer displays expose a King Meter service (`43480001-f001-4b49-4e47-204d4554455
 | `0x0B` status | `0x06` | Speed | uint16 ÷ 10 → km/h |
 | | `0x07` | Max speed | uint16 ÷ 10 → km/h |
 | | `0x08` | Average speed | uint16 ÷ 10 → km/h |
+| | `0x09` | Trip distance | uint32 ÷ 10 → km |
 | | `0x0A` | Ride time | uint32 → seconds |
-| | `0x0C` | Trip distance | uint32 ÷ 10 → km |
+| | `0x0B` | Remaining range | uint16 → km (any byte ≥ `0x80` = none) |
+| | `0x0C` | Total range (odometer) | uint32 ÷ 10 → km |
 | | `0x0F` | Battery | uint8 → % |
 | | `0x11` | Light (unconfirmed) | uint8 (0 = off) |
 | `0x04` info | `0x70` | Serial number | ASCII string |
 
-Add `logger: logs: cgo: VERBOSE` to log every raw notification.
+The first 20 requests and notifications of every King Meter connection are logged at DEBUG, and a summary of the traffic (requests, notifications, frames, CRC errors, skipped bytes) every 30 s. The bridge also listens on the service's other notify characteristics (`0xFF03`, `0xFF04` on the CGO800) and logs what arrives there. Add `logger: logs: cgo: VERBOSE` to log every raw notification.
 
 ## Repository layout
 

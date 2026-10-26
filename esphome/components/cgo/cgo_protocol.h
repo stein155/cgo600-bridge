@@ -105,11 +105,20 @@ class FrameParser {
  public:
     static constexpr size_t BUFFER_SIZE = 4 * (0xFF + OVERHEAD);
 
-    void reset() { this->len_ = 0; }
+    void reset() {
+        this->len_ = 0;
+        this->frames_ = 0;
+        this->skipped_bytes_ = 0;
+    }
     // Same contract as protocol::FrameParser::feed. Valid frames that carry
     // nothing we decode (writes, unknown commands) are counted in unhandled.
     bool feed(BikeState &state, const uint8_t *data, size_t len, bool &saw_trip, uint32_t &bad_crc,
               uint32_t &unhandled);
+
+    // Diagnostics since the last reset: frames that passed the CRC check, and
+    // bytes discarded because they did not form a frame.
+    uint32_t frames() const { return this->frames_; }
+    uint32_t skipped_bytes() const { return this->skipped_bytes_; }
 
  private:
     void append_(const uint8_t *data, size_t len);
@@ -117,6 +126,8 @@ class FrameParser {
 
     uint8_t buffer_[BUFFER_SIZE]{};
     size_t len_{0};
+    uint32_t frames_{0};
+    uint32_t skipped_bytes_{0};
 };
 
 }  // namespace km
