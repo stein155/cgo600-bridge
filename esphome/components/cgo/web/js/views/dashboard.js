@@ -21,7 +21,7 @@ function renderDashboard() {
     const totalKm = bike.range != null ? Number(bike.range) : life.km;
 
     const screen = el('div', { class: 'screen' }, [
-        screenHeader(T.t('tab_dashboard'), el('span', null, [icon('i-bluetooth', { size: 13 }), ' ' + (State.config && State.config.device_name || 'CGO600, CGO800')])),
+        screenHeader(T.t('tab_dashboard')),
         el('div', { class: 'screen-body' }, [
             renderHero(bike, batteryPct, rangeLeft, status, tone, lightOn, lightDisabled),
             renderLifetimeCard(totalKm, life, lifeT, T),

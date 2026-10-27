@@ -34,7 +34,7 @@ static constexpr size_t MAX_FRAME_LEN = 256;
 // A CGO600 variant that sends no data this long after polling started gets the
 // encryption handshake.
 static constexpr uint32_t NUS_ENCRYPTION_AFTER_MS = 5000;
-static constexpr size_t MAX_LOGGED_BYTES = 64;
+static constexpr size_t MAX_LOGGED_BYTES = 128;  // fits a full status frame
 // Connection parameters (units: 1.25 ms, 10 ms). Connect with a short interval
 // so service discovery is quick: the bike is often switched off seconds after
 // arriving, and a 50 ms interval stretched discovery to over 10 s. Once the

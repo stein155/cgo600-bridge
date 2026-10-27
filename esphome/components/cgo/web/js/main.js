@@ -1,7 +1,12 @@
 // ─── Render ──────────────────────────────────────────────
 const root = document.getElementById('root');
+let renderedView = null;
 
 function render() {
+    // Rebuilding replaces the scroll containers, so carry their positions over
+    // while the same screen stays open.
+    const view = Route.tab + '/' + Route.rideId;
+    const scrollTops = view === renderedView ? Array.from(root.querySelectorAll('.screen'), s => s.scrollTop) : [];
     clear(root);
     const showDetail = Route.rideId != null;
 
@@ -18,6 +23,14 @@ function render() {
     if (!showDetail) app.appendChild(renderTabBar());
 
     root.appendChild(app);
+    root.querySelectorAll('.screen').forEach((s, i) => { if (scrollTops[i]) s.scrollTop = scrollTops[i]; });
+    renderedView = view;
+}
+
+// A rebuild would take the focus out of a field the user is in.
+function isEditing() {
+    const a = document.activeElement;
+    return !!a && root.contains(a) && ['INPUT', 'SELECT', 'TEXTAREA'].indexOf(a.tagName) >= 0;
 }
 
 // ─── Data flow ───────────────────────────────────────────
@@ -31,11 +44,11 @@ function refreshRides() {
     return api('/api/rides').then(d => {
         State.rides = Array.isArray(d.rides) ? d.rides.slice() : [];
         State.rides.sort((a, b) => new Date(b.window_end).getTime() - new Date(a.window_end).getTime());
-        render();
+        if (!isEditing()) render();
     }).catch(() => {});
 }
 function fetchStateOnce() {
-    return api('/api/state').then(s => { State.bike = s; render(); }).catch(() => {});
+    return api('/api/state').then(s => { State.bike = s; if (!isEditing()) render(); }).catch(() => {});
 }
 
 // Re-render on language/theme changes.
