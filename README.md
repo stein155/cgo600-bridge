@@ -15,8 +15,6 @@ ESP32 firmware, built on [ESPHome](https://esphome.io), that reads live telemetr
 | Longtail Duo, Longtail Duo_D | **Experimental**, untested |
 | AGO AIR, AGO AIR-BELT_D, Wayfarer_B, CGO600_D | **Experimental**, untested |
 | AGO, AGOX, AGOT, CARGO, CGO COMPACT_D, CGO001 | **Experimental**, untested |
-| DM | Not supported |
-| Bosch Smart System bikes | Not supported (own Bosch protocol) |
 
 Only the CGO600 is supported. The other bikes are detected automatically and get the requests the Tenways app uses for them, including its encrypted mode, but reading data and light control have not been confirmed on any of them yet. Logs from such a bike are very welcome in [issue #2](https://github.com/stein155/cgo600-bridge/issues/2).
 
