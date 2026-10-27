@@ -1,5 +1,6 @@
 #include "cgo_protocol.h"
 
+#include <cstdio>
 #include <cstring>
 
 namespace esphome::cgo::protocol {
@@ -226,28 +227,43 @@ bool FrameParser::feed(BikeState &state, const uint8_t *data, size_t len, bool &
 
 namespace km {
 
-static const uint8_t LONGTAIL_STATUS_KEYS[] = {0x06, 0x07, 0x08, 0x09, 0x11, 0x0A, 0x0B, 0x0C, 0x0F, 0x23, 0x4F};
-static const uint8_t LONGTAIL_INFO_KEYS[] = {0x04, 0x05, 0x4F, 0x70};
-static const uint8_t CGO800_STATUS_KEYS[] = {0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0F, 0x11, 0x23};
-static const uint8_t CGO800_INFO_KEYS[] = {0x04, 0x05};
+// Requests of the Tenways app 2.18.0 per driver.
+static const uint8_t CGO800_STATUS[] = {0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0F, 0x11, 0x23};
+static const uint8_t CGO800_INFO[] = {0x04, 0x05};
+static const uint8_t CGO009_STATUS[] = {0x06, 0x07, 0x08, 0x09, 0x11, 0x12, 0x0A, 0x0B, 0x0C, 0x0F, 0x23, 0x4F, 0x50};
+static const uint8_t CGO009_INFO[] = {0x04, 0x05, 0x70, 0x4F, 0x50};
+static const uint8_t LONGTAIL_STATUS[] = {0x06, 0x07, 0x08, 0x09, 0x11, 0x0A, 0x0B, 0x0C, 0x0F, 0x23, 0x4F};
+static const uint8_t LONGTAIL_INFO[] = {0x04, 0x05, 0x4F, 0x70};
+static const uint8_t AGO_AIR_INFO[] = {0x04, 0x05, 0x4F, 0x76};
+static const uint8_t AGO_STATUS[] = {0x05, 0x06, 0x07, 0x08, 0x09, 0x11, 0x0A, 0x0B, 0x0C, 0x0F, 0x23};
+static const uint8_t AGO_INFO[] = {0x04, 0x05};
 
-const Profile LONGTAIL_PROFILE{"Longtail Duo",
-                               LONGTAIL_STATUS_KEYS,
-                               sizeof(LONGTAIL_STATUS_KEYS),
-                               LONGTAIL_INFO_KEYS,
-                               sizeof(LONGTAIL_INFO_KEYS),
-                               false,
-                               false};
-const Profile CGO800_PROFILE{"CGO800",
-                             CGO800_STATUS_KEYS,
-                             sizeof(CGO800_STATUS_KEYS),
-                             CGO800_INFO_KEYS,
-                             sizeof(CGO800_INFO_KEYS),
-                             true,
-                             true};
+#define KEYS(name) name, sizeof(name)
+const Profile CGO800_PROFILE{"CGO800", KEYS(CGO800_STATUS), KEYS(CGO800_INFO), true, true, false, true};
+const Profile CGO009_PROFILE{"CGO009", KEYS(CGO009_STATUS), KEYS(CGO009_INFO), false, false, false, false};
+const Profile LONGTAIL_PROFILE{"Longtail Duo", KEYS(LONGTAIL_STATUS), KEYS(LONGTAIL_INFO), false, false, false, false};
+const Profile AGO_AIR_PROFILE{"AGO AIR", KEYS(LONGTAIL_STATUS), KEYS(AGO_AIR_INFO), false, false, true, false};
+const Profile AGO_PROFILE{"AGO", KEYS(AGO_STATUS), KEYS(AGO_INFO), false, false, false, false};
+#undef KEYS
+
+static bool starts_with(const char *text, const char *prefix) { return strncmp(text, prefix, strlen(prefix)) == 0; }
 
 const Profile &profile_for(const char *device_name) {
-    return strncmp(device_name, "CGO800", 6) == 0 ? CGO800_PROFILE : LONGTAIL_PROFILE;
+    // Same order as the app's driver selection.
+    if (starts_with(device_name, "CGO800"))
+        return CGO800_PROFILE;
+    if (starts_with(device_name, "CGO009"))
+        return CGO009_PROFILE;
+    if (starts_with(device_name, "Longtail Duo"))
+        return LONGTAIL_PROFILE;
+    if (starts_with(device_name, "AGO AIR") || starts_with(device_name, "Wayfarer_B") ||
+        starts_with(device_name, "CGO600_D"))
+        return AGO_AIR_PROFILE;
+    return AGO_PROFILE;
+}
+
+const Profile &alternative_to(const Profile &profile) {
+    return profile.crc_low_first ? AGO_PROFILE : CGO800_PROFILE;
 }
 
 static size_t finish_frame(uint8_t *out, size_t body_len, bool crc_low_first) {
@@ -278,9 +294,8 @@ size_t build_write(uint8_t *out, uint8_t key, const uint8_t *value, uint8_t size
     return finish_frame(out, 6 + size, crc_low_first);
 }
 
-// The serial number on the CGO800. The Longtail Duo reports another serial
-// here and the one we expose under 0x70, which its reply lists later.
-static constexpr uint8_t KEY_SERIAL_CGO800 = 0x05;
+static constexpr uint8_t KEY_FIRMWARE = 0x04;
+static constexpr uint8_t KEY_SERIAL = 0x05;
 static constexpr uint8_t KEY_SPEED = 0x06;
 static constexpr uint8_t KEY_MAX_SPEED = 0x07;
 static constexpr uint8_t KEY_AVG_SPEED = 0x08;
@@ -290,14 +305,14 @@ static constexpr uint8_t KEY_REMAINING_RANGE = 0x0B;
 static constexpr uint8_t KEY_ODOMETER = 0x0C;
 static constexpr uint8_t KEY_BATTERY = 0x0F;
 static constexpr uint8_t KEY_POWER = 0x23;
-static constexpr uint8_t KEY_SERIAL = 0x70;
 
 // Several keys collide with CGO600 field IDs (0x11 is the light here but the
 // speed on the CGO600), so translate them to the CGO600 IDs before decoding.
 // Returns 0 for keys we do not decode.
 static uint8_t to_field_id(uint8_t key) {
     switch (key) {
-        case KEY_SERIAL_CGO800:
+        case KEY_FIRMWARE:
+            return FIELD_FIRMWARE;
         case KEY_SERIAL:
             return FIELD_SN;
         case KEY_SPEED:
@@ -325,21 +340,44 @@ static uint8_t to_field_id(uint8_t key) {
     }
 }
 
-// The remaining range is the only King Meter value encoded differently from
-// the CGO600 field it maps to.
-static bool decode_km_field(BikeState &state, uint8_t field_id, const uint8_t *data, uint8_t len) {
-    if (field_id != FIELD_REMAINING_RANGE)
-        return decode_field(state, field_id, data, len);
-    if (len == 0)
-        return false;
-    // Whole kilometres. The app treats any byte >= 0x80 as no range, which the
-    // display reports with assist level 0 (0x028F).
-    for (uint8_t i = 0; i < len; i++) {
-        if (data[i] >= 0x80)
-            return false;
+// Decodes the values whose King Meter encoding differs from the CGO600 field
+// they map to; the rest decode like CGO600 fields.
+static bool decode_km_field(BikeState &state, const Profile &profile, uint8_t field_id, const uint8_t *data,
+                            uint8_t len) {
+    switch (field_id) {
+        case FIELD_REMAINING_RANGE: {
+            // Whole kilometres; the no-range values are described at Profile.
+            if (len == 0)
+                return false;
+            const uint32_t km = int_be(data, len);
+            if (profile.cgo800_values) {
+                for (uint8_t i = 0; i < len; i++) {
+                    if (data[i] >= 0x80)
+                        return false;
+                }
+            } else if (km == 655 || km == 32767) {
+                return false;
+            }
+            state.remaining_range_km = (float) km;
+            return true;
+        }
+        case FIELD_TOTAL_RANGE:
+            if (!profile.cgo800_values)
+                return decode_field(state, field_id, data, len);
+            state.total_range_km = (float) int_be(data, len);
+            return true;
+        case FIELD_FIRMWARE: {
+            if (profile.cgo800_values)
+                return decode_field(state, field_id, data, len);
+            // Dotted bytes, such as 01 02 03 for "1.2.3".
+            size_t pos = 0;
+            for (uint8_t i = 0; i < len && pos + 4 < sizeof(state.firmware); i++)
+                pos += snprintf(state.firmware + pos, sizeof(state.firmware) - pos, i ? ".%u" : "%u", data[i]);
+            return len > 0;
+        }
+        default:
+            return decode_field(state, field_id, data, len);
     }
-    state.remaining_range_km = (float) int_be(data, len);
-    return true;
 }
 
 static bool is_frame_type(uint8_t b) { return b == TYPE_READ || b == TYPE_WRITE; }
@@ -419,7 +457,7 @@ bool FrameParser::feed(BikeState &state, const uint8_t *data, size_t len, bool &
                 const uint8_t field_id = to_field_id(key);
                 if (field_id == FIELD_TRIP_DISTANCE || field_id == FIELD_TRIP_DURATION)
                     saw_trip = true;
-                if (field_id != 0 && decode_km_field(state, field_id, frame + pos, size)) {
+                if (field_id != 0 && decode_km_field(state, *this->profile_, field_id, frame + pos, size)) {
                     changed = true;
                     decoded = true;
                 }

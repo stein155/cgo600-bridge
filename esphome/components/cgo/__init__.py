@@ -30,7 +30,21 @@ CONF_WEB_UI_ID = "web_ui_id"
 CONF_ON_RIDE = "on_ride"
 
 # Matched case-insensitively as substrings, so CGO800 also finds "CGO800 PLUS".
-DEFAULT_DEVICE_NAMES = ["CGO600", "CGO800"]
+# Every Tenways bike the app knows; plain "AGO" is left out because it also
+# matches unrelated names such as "Chicago".
+DEFAULT_DEVICE_NAMES = [
+    "CGO600",
+    "CGO800",
+    "CGO009",
+    "CGO001",
+    "CGO COMPACT",
+    "Longtail Duo",
+    "AGO AIR",
+    "AGOX",
+    "AGOT",
+    "CARGO",
+    "Wayfarer",
+]
 
 cgo_ns = cg.esphome_ns.namespace("cgo")
 CGOComponent = cgo_ns.class_("CGOComponent", esp32_ble_client.BLEClientBase)

@@ -90,9 +90,77 @@ static void test_king_meter_requests() {
 static void test_king_meter_profiles() {
     check(&km::profile_for("CGO800 Plus") == &km::CGO800_PROFILE, "CGO800 Plus gets the CGO800 profile");
     check(&km::profile_for("CGO800S") == &km::CGO800_PROFILE, "CGO800S gets the CGO800 profile");
-    check(&km::profile_for("Longtail Duo") == &km::LONGTAIL_PROFILE, "Longtail Duo gets its profile");
-    check(&km::profile_for("") == &km::LONGTAIL_PROFILE, "an unnamed bike gets the default profile");
-    check(km::CGO800_PROFILE.try_encryption && !km::LONGTAIL_PROFILE.try_encryption, "encryption profiles");
+    check(&km::profile_for("CGO009L") == &km::CGO009_PROFILE, "CGO009L gets the CGO009 profile");
+    check(&km::profile_for("CGO009_D") == &km::CGO009_PROFILE, "CGO009_D gets the CGO009 profile");
+    check(&km::profile_for("Longtail Duo_D") == &km::LONGTAIL_PROFILE, "Longtail Duo_D gets its profile");
+    check(&km::profile_for("AGO AIR-BELT_D") == &km::AGO_AIR_PROFILE, "AGO AIR-BELT_D gets the AGO AIR profile");
+    check(&km::profile_for("Wayfarer_B") == &km::AGO_AIR_PROFILE, "Wayfarer_B gets the AGO AIR profile");
+    check(&km::profile_for("CGO600_D") == &km::AGO_AIR_PROFILE, "CGO600_D gets the AGO AIR profile");
+    check(&km::profile_for("AGOX") == &km::AGO_PROFILE, "AGOX gets the AGO profile");
+    check(&km::profile_for("CARGO") == &km::AGO_PROFILE, "CARGO gets the AGO profile");
+    check(&km::profile_for("") == &km::AGO_PROFILE, "an unnamed bike gets the AGO profile");
+    check(km::CGO800_PROFILE.try_encryption && !km::AGO_PROFILE.try_encryption, "only the CGO800 starts encrypted");
+    check(km::AGO_AIR_PROFILE.write_with_response && !km::AGO_PROFILE.write_with_response, "write types");
+    check(&km::alternative_to(km::CGO800_PROFILE) == &km::AGO_PROFILE &&
+              &km::alternative_to(km::LONGTAIL_PROFILE) == &km::CGO800_PROFILE,
+          "the alternative layout has the other CRC order");
+}
+
+// Request keys of each driver, without their CRC, as the app's frames list them.
+static void test_king_meter_profile_requests() {
+    struct Case {
+        const km::Profile &profile;
+        bool status;
+        Bytes expected;
+    };
+    const Case cases[] = {
+        {km::CGO009_PROFILE, false, {0x62, 0x00, 0x06, 0x05, 0x04, 0x05, 0x70, 0x4F, 0x50}},
+        {km::CGO009_PROFILE,
+         true,
+         {0x62, 0x00, 0x0E, 0x0D, 0x06, 0x07, 0x08, 0x09, 0x11, 0x12, 0x0A, 0x0B, 0x0C, 0x0F, 0x23, 0x4F, 0x50}},
+        {km::AGO_AIR_PROFILE, false, {0x62, 0x00, 0x05, 0x04, 0x04, 0x05, 0x4F, 0x76}},
+        {km::AGO_AIR_PROFILE,
+         true,
+         {0x62, 0x00, 0x0C, 0x0B, 0x06, 0x07, 0x08, 0x09, 0x11, 0x0A, 0x0B, 0x0C, 0x0F, 0x23, 0x4F}},
+        {km::AGO_PROFILE, false, {0x62, 0x00, 0x03, 0x02, 0x04, 0x05}},
+        {km::AGO_PROFILE,
+         true,
+         {0x62, 0x00, 0x0C, 0x0B, 0x05, 0x06, 0x07, 0x08, 0x09, 0x11, 0x0A, 0x0B, 0x0C, 0x0F, 0x23}},
+    };
+    for (const auto &c : cases) {
+        uint8_t out[64];
+        const size_t len = c.status ? km::build_read(out, c.profile.status_keys, c.profile.status_count, false)
+                                    : km::build_read(out, c.profile.info_keys, c.profile.info_count, false);
+        const std::string what = std::string(c.profile.name) + (c.status ? " status request" : " info request");
+        check_bytes(out, len - 3, c.expected, what.c_str());
+    }
+}
+
+// The CGO800 driver decodes the odometer, the range and the firmware
+// differently from the other King Meter drivers.
+static void test_king_meter_profile_values() {
+    // Odometer 1201, firmware 01 02 03 or "V12", range 0x0290 (656 km).
+    const Bytes frame = reply({0x62, 0x00, 0x10, 0x03, 0x0C, 0x04, 0x00, 0x00, 0x04, 0xB1, 0x04, 0x03, 0x01, 0x02,
+                               0x03, 0x0B, 0x02, 0x02, 0x90});
+    const Bytes ascii = reply({0x62, 0x00, 0x06, 0x01, 0x04, 0x03, 'V', '1', '2'});
+    bool trip = false;
+    uint32_t bad = 0, unhandled = 0;
+
+    km::FrameParser ago;
+    BikeState s1;
+    ago.feed(s1, frame.data(), frame.size(), trip, bad, unhandled);
+    check(s1.total_range_km > 120.09f && s1.total_range_km < 120.11f, "AGO odometer / 10");
+    check(strcmp(s1.firmware, "1.2.3") == 0, "AGO firmware as dotted bytes");
+    check(s1.remaining_range_km == 656.0f, "AGO range 656 km");
+
+    km::FrameParser cgo800;
+    cgo800.set_profile(&km::CGO800_PROFILE);
+    BikeState s2;
+    cgo800.feed(s2, frame.data(), frame.size(), trip, bad, unhandled);
+    check(s2.total_range_km == 1201.0f, "CGO800 odometer in whole km");
+    check(s2.remaining_range_km == -1, "CGO800 range with a byte >= 0x80 means none");
+    cgo800.feed(s2, ascii.data(), ascii.size(), trip, bad, unhandled);
+    check(strcmp(s2.firmware, "V12") == 0, "CGO800 firmware as ASCII");
 }
 
 static void test_king_meter_parser() {
@@ -235,6 +303,8 @@ static void test_crypto() {
 int main() {
     test_king_meter_requests();
     test_king_meter_profiles();
+    test_king_meter_profile_requests();
+    test_king_meter_profile_values();
     test_king_meter_parser();
     test_nus_requests();
     test_nus_parser();

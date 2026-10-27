@@ -321,6 +321,10 @@ void CGOComponent::on_services_ready_() {
     } else if (this->get_service(KM_SERVICE_UUID) != nullptr) {
         this->transport_ = Transport::KING_METER;
         this->km_profile_ = &protocol::km::profile_for(this->bike_name_.c_str());
+        this->km_parser_.set_profile(this->km_profile_);
+        const size_t name_len = this->bike_name_.size();
+        this->km_write_with_response_ = this->km_profile_->write_with_response ||
+                                        (name_len >= 2 && this->bike_name_.compare(name_len - 2, 2, "_D") == 0);
         tx = this->get_characteristic(KM_SERVICE_UUID, KM_NOTIFY_UUID);
         rx = this->get_characteristic(KM_SERVICE_UUID, KM_WRITE_UUID);
     }
@@ -548,7 +552,9 @@ void CGOComponent::handle_at_reply_(const uint8_t *data, size_t len) {
     text[n] = '\0';
     const uint32_t count = ++this->link_stats_.at_replies;
     ESP_LOGW(TAG, "Display reported an error: %s (%u this connection)", text, (unsigned) count);
-    if (this->is_nus_variant_() && this->enc_handshake_ == EncHandshake::NONE && this->phase_ == Phase::POLLING) {
+    // Encrypted displays report this error until the handshake has run.
+    const bool may_need_encryption = this->is_nus_variant_() || this->transport_ == Transport::KING_METER;
+    if (may_need_encryption && this->enc_handshake_ == EncHandshake::NONE && this->phase_ == Phase::POLLING) {
         this->start_encryption_(millis());
         return;
     }
@@ -602,13 +608,20 @@ void CGOComponent::request_static_fields_() {
 void CGOComponent::poll_() {
     bool ok;
     if (this->transport_ == Transport::KING_METER) {
-        // A display ignores requests in the other layout, so a bike whose name
-        // did not pick the right one (or that advertises none) gets both tried.
+        // A silent display may expect the encryption handshake, or requests in
+        // the other CRC order, for example when its name picked the wrong
+        // profile or it advertises none. Try the handshake first, then the
+        // other layout.
         if (this->km_parser_.frames() == 0 && !this->enc_session_.active() && this->link_stats_.at_replies == 0 &&
             ++this->km_unanswered_polls_ > KM_SWITCH_AFTER_POLLS) {
             this->km_unanswered_polls_ = 0;
-            this->km_profile_ = this->km_profile_ == &protocol::km::CGO800_PROFILE ? &protocol::km::LONGTAIL_PROFILE
-                                                                                   : &protocol::km::CGO800_PROFILE;
+            if (this->enc_handshake_ == EncHandshake::NONE) {
+                ESP_LOGI(TAG, "No reply from the bike, trying the encryption handshake");
+                this->start_encryption_(millis());
+                return;
+            }
+            this->km_profile_ = &protocol::km::alternative_to(*this->km_profile_);
+            this->km_parser_.set_profile(this->km_profile_);
             ESP_LOGI(TAG, "No reply from the bike, trying the %s layout", this->km_profile_->name);
             this->request_static_fields_();
         }
@@ -649,13 +662,13 @@ bool CGOComponent::write_km_read_(const uint8_t *keys, uint8_t count) {
 
 bool CGOComponent::send_frame_(const uint8_t *frame, size_t len) {
     if (!this->enc_session_.active())
-        return this->write_(frame, len, this->enc_write_with_response_);
+        return this->write_(frame, len, this->enc_write_with_response_ || this->km_write_with_response_);
     uint8_t packet[MAX_WRITE_LEN];
     const size_t packet_len = this->enc_session_.wrap(frame, len, packet, sizeof(packet));
     if (packet_len == 0)
         return false;
     this->log_bytes_("TX plain", this->rx_handle_, frame, len, this->link_stats_.requests < DEBUG_LOGGED);
-    return this->write_(packet, packet_len, this->enc_write_with_response_);
+    return this->write_(packet, packet_len, this->enc_write_with_response_ || this->km_write_with_response_);
 }
 
 bool CGOComponent::write_(const protocol::Command &cmd) { return this->write_(cmd.data, cmd.len); }
@@ -762,6 +775,7 @@ void CGOComponent::reset_session_() {
     this->link_stats_ = {};
     this->enc_handshake_ = EncHandshake::NONE;
     this->enc_write_with_response_ = false;
+    this->km_write_with_response_ = false;
     this->enc_session_.reset();
     memset(this->enc_app_random_, 0, sizeof(this->enc_app_random_));
     memset(this->enc_session_key_, 0, sizeof(this->enc_session_key_));

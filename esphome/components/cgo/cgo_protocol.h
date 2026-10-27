@@ -101,7 +101,8 @@ static constexpr uint8_t END_BYTE = 0x45;
 static constexpr size_t OVERHEAD = 6;  // type, header, len, crc, crc, end
 static constexpr uint8_t KEY_LIGHT = 0x11;
 
-// What a display is asked for and how its requests are checksummed.
+// One driver of the Tenways app: what a display is asked for, how its
+// requests are checksummed and how its values decode.
 struct Profile {
     const char *name;
     const uint8_t *status_keys;
@@ -109,15 +110,28 @@ struct Profile {
     const uint8_t *info_keys;
     uint8_t info_count;
     bool crc_low_first;
-    // Try the encryption handshake first (see cgo_crypto.h).
+    // Try the encryption handshake first (see cgo_crypto.h); other bikes try
+    // it only after getting no answer.
     bool try_encryption;
+    // Written with response, like the app does for these models.
+    bool write_with_response;
+    // CGO800: the odometer in whole km, firmware as ASCII and any range byte
+    // >= 0x80 meaning no range. Others: odometer / 10, firmware as dotted
+    // bytes and 655 or 32767 meaning no range.
+    bool cgo800_values;
 };
 
-extern const Profile LONGTAIL_PROFILE;
 extern const Profile CGO800_PROFILE;
+extern const Profile CGO009_PROFILE;
+extern const Profile LONGTAIL_PROFILE;
+extern const Profile AGO_AIR_PROFILE;
+extern const Profile AGO_PROFILE;
 
-// Picks the profile from the advertised name; other names get the Longtail Duo's.
+// Picks the profile from the advertised name like the app does; other and
+// missing names get the AGO profile, the app's default.
 const Profile &profile_for(const char *device_name);
+// The profile to try when a display answers nothing: the other CRC order.
+const Profile &alternative_to(const Profile &profile);
 
 // Builds a read request for keys; out must hold count + OVERHEAD + 1 bytes.
 size_t build_read(uint8_t *out, const uint8_t *keys, uint8_t count, bool crc_low_first);
@@ -142,6 +156,7 @@ class FrameParser {
     // nothing we decode (writes, unknown commands) are counted in unhandled.
     bool feed(BikeState &state, const uint8_t *data, size_t len, bool &saw_trip, uint32_t &bad_crc,
               uint32_t &unhandled);
+    void set_profile(const Profile *profile) { this->profile_ = profile; }
 
     // Diagnostics since the last reset: frames that passed the CRC check, and
     // bytes discarded because they did not form a frame.
@@ -156,6 +171,7 @@ class FrameParser {
     size_t len_{0};
     uint32_t frames_{0};
     uint32_t skipped_bytes_{0};
+    const Profile *profile_{&AGO_PROFILE};
 };
 
 }  // namespace km
