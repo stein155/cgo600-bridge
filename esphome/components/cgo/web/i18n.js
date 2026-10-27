@@ -83,11 +83,6 @@ const I18N = {
         theme_light: 'Light',
         theme_dark: 'Dark',
 
-        bt_name: 'Bluetooth names',
-        bt_name_hint: 'What the bridge looks for. Default: CGO600, CGO800.',
-        poll_interval: 'Poll interval',
-        poll_interval_hint: 'How often the bridge wakes the bike. Lower drains the bike faster.',
-        seconds: 'seconds',
         bike_id: 'Bike ID',
         bike_id_hint: 'Auto-detected. Shown for reference.',
         not_available: 'Not available yet',
@@ -200,11 +195,6 @@ const I18N = {
         theme_light: 'Licht',
         theme_dark: 'Donker',
 
-        bt_name: 'Bluetooth‑namen',
-        bt_name_hint: 'Waar de bridge naar zoekt. Standaard: CGO600, CGO800.',
-        poll_interval: 'Poll‑interval',
-        poll_interval_hint: 'Hoe vaak de bridge de fiets aanspreekt. Lager = sneller leeg.',
-        seconds: 'seconden',
         bike_id: 'Fiets‑ID',
         bike_id_hint: 'Automatisch gedetecteerd.',
         not_available: 'Nog niet beschikbaar',
