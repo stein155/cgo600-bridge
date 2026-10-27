@@ -14,6 +14,7 @@
 #include "esphome/core/component.h"
 #include "esphome/core/helpers.h"
 #include "esphome/core/preferences.h"
+#include "cgo_crypto.h"
 #include "cgo_protocol.h"
 #include "ride_log.h"
 
@@ -80,14 +81,18 @@ class CGOComponent : public esp32_ble_client::BLEClientBase {
 
     bool matches_(const espbt::ESPBTDevice &device) const;
     void on_services_ready_();
-    void subscribe_extra_km_notify_();
     void log_services_();
     void log_bytes_(const char *what, uint16_t handle, const uint8_t *data, size_t len, bool debug);
     void log_km_summary_();
     void run_handshake_step_(uint32_t now);
     bool write_(const protocol::Command &cmd);
-    bool write_(const uint8_t *data, size_t len);
+    bool write_(const uint8_t *data, size_t len, bool with_response = false);
+    bool write_km_frame_(const uint8_t *frame, size_t len);
     bool write_km_read_(const uint8_t *keys, uint8_t count);
+    void finish_handshake_(uint32_t now);
+    bool run_km_handshake_(uint32_t now);
+    bool handle_km_handshake_reply_(const uint8_t *data, size_t len);
+    void handle_km_at_reply_(const uint8_t *data, size_t len);
     void request_static_fields_();
     void poll_();
     void reset_session_();
@@ -121,17 +126,23 @@ class CGOComponent : public esp32_ble_client::BLEClientBase {
         uint32_t requests{0};
         uint32_t notifications{0};
         uint32_t notification_bytes{0};
-        uint32_t extra_notifications{0};
         uint32_t bad_crc{0};
         uint32_t unhandled{0};
+        uint32_t at_replies{0};
+        uint32_t undecryptable{0};
     };
     KmStats km_stats_;
     const protocol::km::Profile *km_profile_{nullptr};
     uint8_t km_unanswered_polls_{0};
     uint32_t last_km_summary_{0};
-    // Other notify characteristics in the King Meter service (0xFF03, 0xFF04
-    // on the CGO800).
-    uint16_t extra_notify_handles_[2]{};
+    enum class KmHandshake : uint8_t { NONE, WAIT_RANDOM, WAIT_IV, DONE };
+    KmHandshake km_handshake_{KmHandshake::NONE};
+    uint32_t km_handshake_deadline_{0};
+    // Encrypted displays are written with response, as the Tenways app does.
+    bool km_write_with_response_{false};
+    uint8_t km_app_random_[protocol::km::HANDSHAKE_VALUE_LEN]{};
+    uint8_t km_session_key_[32]{};
+    protocol::km::Session km_session_;
     // After a light command, light reports that still show the old state are
     // ignored until this deadline; the bike applies the change with a delay.
     uint32_t light_pending_until_{0};

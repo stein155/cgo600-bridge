@@ -102,6 +102,8 @@ struct Profile {
     const uint8_t *info_keys;
     uint8_t info_count;
     bool crc_low_first;
+    // Try the encryption handshake first (see cgo_crypto.h).
+    bool try_encryption;
 };
 
 extern const Profile LONGTAIL_PROFILE;
@@ -112,8 +114,11 @@ const Profile &profile_for(const char *device_name);
 
 // Builds a read request for keys; out must hold count + OVERHEAD + 1 bytes.
 size_t build_read(uint8_t *out, const uint8_t *keys, uint8_t count, bool crc_low_first);
-// Builds a write that sets a one-byte key; out must hold 10 bytes.
-size_t build_write(uint8_t *out, uint8_t key, uint8_t value, bool crc_low_first);
+// Builds a write that sets one key; out must hold size + 9 bytes.
+size_t build_write(uint8_t *out, uint8_t key, const uint8_t *value, uint8_t size, bool crc_low_first);
+inline size_t build_write(uint8_t *out, uint8_t key, uint8_t value, bool crc_low_first) {
+    return build_write(out, key, &value, 1, crc_low_first);
+}
 
 // Reassembles notification chunks into King Meter frames and decodes their
 // keys into the shared BikeState. Frames pass with either CRC byte order.
