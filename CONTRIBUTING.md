@@ -43,13 +43,18 @@ esphome compile esphome/.install-ci.yaml
 
 ## Testing
 
-There is no automated test suite. Validation is manual:
+`tests/run.sh` builds and runs the host tests of the protocol code: request frames,
+reply parsing and the session encryption, checked against frames from the Tenways app
+and captures. It needs a C++17 compiler and mbedtls (`libmbedtls-dev`, or
+`brew install mbedtls@3` on macOS).
+
+Everything else is validated manually:
 
 1. `esphome compile` must succeed for `esphome/cgo600.yaml` and the install configuration.
 2. Flash to hardware and verify the logs, the BLE connection, the Home Assistant
    entities and the dashboard.
 
-CI compiles both configurations.
+CI runs the host tests and compiles both configurations.
 
 ## Pull requests
 

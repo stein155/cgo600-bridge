@@ -9,9 +9,10 @@ ESP32 firmware, built on [ESPHome](https://esphome.io), that reads live telemetr
 | Bike | Status |
 |---|---|
 | CGO600 | **Supported** |
+| CGO600 Pro, CGO600 PLUS, CGO600 Pro-C, CGO600 Pro_T | **Experimental**, untested |
 | CGO800, CGO800 Plus and other bikes with a King Meter display | **Experimental**, untested |
 
-Only the CGO600 is supported. Bikes whose display uses the King Meter BLE service are detected automatically, but reading data and light control have not been confirmed on any of them yet. Logs from such a bike are very welcome in [issue #2](https://github.com/stein155/cgo600-bridge/issues/2).
+Only the CGO600 is supported. The other bikes are detected automatically and get the requests the Tenways app uses for them, including its encrypted mode, but reading data and light control have not been confirmed on any of them yet. Logs from such a bike are very welcome in [issue #2](https://github.com/stein155/cgo600-bridge/issues/2).
 
 ## Motivation
 
@@ -96,10 +97,11 @@ switch:
 | `sensor` | `speed`, `max_speed`, `avg_speed` | km/h |
 | `sensor` | `trip_distance`, `remaining_range`, `range` | km |
 | `sensor` | `trip_duration` | s |
-| `text_sensor` | `serial_number`, `ble_status` | — |
+| `sensor` | `power` | W |
+| `text_sensor` | `serial_number`, `firmware_version`, `ble_status` | — |
 | `switch` | `light` | — |
 
-All keys are optional. `range` is the bike's total odometer.
+All keys are optional. `range` is the bike's total odometer. `power` and `firmware_version` stay empty on bikes that do not report them; the bridge asks for the power until the bike answers once, then polls it with the other telemetry.
 
 Every inferred ride fires the `on_ride` trigger with `distance_km`, `duration_s` and `battery_used`. The ready-made configuration forwards it as a Home Assistant event, which you can use in automations:
 

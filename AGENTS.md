@@ -43,8 +43,9 @@ python3 esphome/components/cgo/web_assets.py
 CI compiles `esphome/cgo600.yaml` and the install configuration.
 
 ## Tests
-There is no automated test setup. Validation is manual:
-1. Compile both configurations.
+`tests/run.sh` runs the host tests of the protocol code (frames, parsing, encryption); it needs mbedtls
+(`libmbedtls-dev`, or `brew install mbedtls@3`). Everything else is validated manually:
+1. Run `tests/run.sh` and compile both configurations.
 2. Flash hardware if needed.
 3. Verify the logs, BLE connection, Home Assistant entities, the dashboard and the ride history.
 
@@ -70,7 +71,7 @@ There is no automated test setup. Validation is manual:
 ## Workflow Notes
 - At minimum ensure both configurations compile.
 - For protocol changes, keep field IDs and entity keys stable.
-- Be explicit that the repo currently has no automated tests or lint gates.
+- Be explicit that only the protocol code has automated tests and there are no lint gates.
 - This setup may be used for live debugging; prefer adding observability that can be read remotely when safe.
 - The user allows live firmware builds and uploads for diagnostics and fixes when needed.
 - Live logs are available over WiFi with `esphome logs`; treat them as a normal debugging path.

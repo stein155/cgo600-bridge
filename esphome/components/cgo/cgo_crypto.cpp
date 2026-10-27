@@ -6,7 +6,7 @@
 #include "mbedtls/cipher.h"
 #include "mbedtls/md.h"
 
-namespace esphome::cgo::protocol::km {
+namespace esphome::cgo::protocol {
 
 static constexpr uint8_t PACKET_START = 0xA5;
 static constexpr uint8_t PACKET_END = 0x5A;
@@ -62,10 +62,16 @@ bool derive_session_key(const uint8_t app_random[16], const uint8_t device_rando
     return hmac_sha256(prk, sizeof(prk), device_random, HANDSHAKE_VALUE_LEN, &COUNTER, 1, key);
 }
 
-const uint8_t *handshake_value(const uint8_t *data, size_t len, uint8_t type, uint8_t key) {
+const uint8_t *km_handshake_value(const uint8_t *data, size_t len, uint8_t type, uint8_t key) {
     if (len < 6 + HANDSHAKE_VALUE_LEN || data[0] != type || data[4] != key || data[5] != HANDSHAKE_VALUE_LEN)
         return nullptr;
     return data + 6;
+}
+
+const uint8_t *nus_handshake_value(const uint8_t *data, size_t len, uint8_t type, uint8_t key) {
+    if (len < 4 + HANDSHAKE_VALUE_LEN || data[0] != type || data[2] != key || data[3] != HANDSHAKE_VALUE_LEN)
+        return nullptr;
+    return data + 4;
 }
 
 void Session::start(const uint8_t key[32], const uint8_t iv[16]) {
@@ -139,4 +145,4 @@ size_t Session::unwrap(const uint8_t *packet, size_t len, uint8_t *out, size_t o
     return payload_len - pad;
 }
 
-}  // namespace esphome::cgo::protocol::km
+}  // namespace esphome::cgo::protocol

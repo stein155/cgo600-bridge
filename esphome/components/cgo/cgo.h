@@ -54,7 +54,9 @@ class CGOComponent : public esp32_ble_client::BLEClientBase {
     void set_trip_duration_sensor(sensor::Sensor *s) { this->trip_duration_sensor_ = s; }
     void set_remaining_range_sensor(sensor::Sensor *s) { this->remaining_range_sensor_ = s; }
     void set_range_sensor(sensor::Sensor *s) { this->range_sensor_ = s; }
+    void set_power_sensor(sensor::Sensor *s) { this->power_sensor_ = s; }
     void set_serial_number_text_sensor(text_sensor::TextSensor *s) { this->serial_number_text_sensor_ = s; }
+    void set_firmware_version_text_sensor(text_sensor::TextSensor *s) { this->firmware_version_text_sensor_ = s; }
     void set_ble_status_text_sensor(text_sensor::TextSensor *s) { this->ble_status_text_sensor_ = s; }
     void set_light_switch(switch_::Switch *s) { this->light_switch_ = s; }
 
@@ -87,12 +89,15 @@ class CGOComponent : public esp32_ble_client::BLEClientBase {
     void run_handshake_step_(uint32_t now);
     bool write_(const protocol::Command &cmd);
     bool write_(const uint8_t *data, size_t len, bool with_response = false);
-    bool write_km_frame_(const uint8_t *frame, size_t len);
+    bool send_frame_(const uint8_t *frame, size_t len);
     bool write_km_read_(const uint8_t *keys, uint8_t count);
     void finish_handshake_(uint32_t now);
-    bool run_km_handshake_(uint32_t now);
-    bool handle_km_handshake_reply_(const uint8_t *data, size_t len);
-    void handle_km_at_reply_(const uint8_t *data, size_t len);
+    bool is_nus_variant_() const;
+    void start_encryption_(uint32_t now);
+    bool encryption_pending_(uint32_t now);
+    bool handle_enc_handshake_reply_(const uint8_t *data, size_t len);
+    void handle_at_reply_(const uint8_t *data, size_t len);
+    bool write_nus_read_(const uint8_t *fields, uint8_t count);
     void request_static_fields_();
     void poll_();
     void reset_session_();
@@ -121,8 +126,8 @@ class CGOComponent : public esp32_ble_client::BLEClientBase {
     uint16_t cccd_handle_{0};
     bool cccd_confirmed_{false};
     uint32_t cccd_deadline_{0};
-    // Per-connection King Meter traffic, logged as a periodic summary.
-    struct KmStats {
+    // Per-connection traffic; logged as a periodic summary for King Meter bikes.
+    struct LinkStats {
         uint32_t requests{0};
         uint32_t notifications{0};
         uint32_t notification_bytes{0};
@@ -131,18 +136,21 @@ class CGOComponent : public esp32_ble_client::BLEClientBase {
         uint32_t at_replies{0};
         uint32_t undecryptable{0};
     };
-    KmStats km_stats_;
+    LinkStats link_stats_;
     const protocol::km::Profile *km_profile_{nullptr};
     uint8_t km_unanswered_polls_{0};
     uint32_t last_km_summary_{0};
-    enum class KmHandshake : uint8_t { NONE, WAIT_RANDOM, WAIT_IV, DONE };
-    KmHandshake km_handshake_{KmHandshake::NONE};
-    uint32_t km_handshake_deadline_{0};
+    enum class EncHandshake : uint8_t { NONE, WAIT_RANDOM, WAIT_IV, DONE };
+    EncHandshake enc_handshake_{EncHandshake::NONE};
+    uint32_t enc_deadline_{0};
+    uint32_t polling_started_ms_{0};
+    // Set once the bike answered a power read; it is then polled with the status.
+    bool power_seen_{false};
     // Encrypted displays are written with response, as the Tenways app does.
-    bool km_write_with_response_{false};
-    uint8_t km_app_random_[protocol::km::HANDSHAKE_VALUE_LEN]{};
-    uint8_t km_session_key_[32]{};
-    protocol::km::Session km_session_;
+    bool enc_write_with_response_{false};
+    uint8_t enc_app_random_[protocol::HANDSHAKE_VALUE_LEN]{};
+    uint8_t enc_session_key_[32]{};
+    protocol::Session enc_session_;
     // After a light command, light reports that still show the old state are
     // ignored until this deadline; the bike applies the change with a delay.
     uint32_t light_pending_until_{0};
@@ -179,7 +187,9 @@ class CGOComponent : public esp32_ble_client::BLEClientBase {
     sensor::Sensor *trip_duration_sensor_{nullptr};
     sensor::Sensor *remaining_range_sensor_{nullptr};
     sensor::Sensor *range_sensor_{nullptr};
+    sensor::Sensor *power_sensor_{nullptr};
     text_sensor::TextSensor *serial_number_text_sensor_{nullptr};
+    text_sensor::TextSensor *firmware_version_text_sensor_{nullptr};
     text_sensor::TextSensor *ble_status_text_sensor_{nullptr};
     switch_::Switch *light_switch_{nullptr};
 };

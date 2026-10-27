@@ -24,13 +24,16 @@ static constexpr uint32_t LIGHT_CONFIRM_WINDOW_MS = 2000;
 static constexpr uint32_t CCCD_CONFIRM_TIMEOUT_MS = 1000;
 // King Meter support is unconfirmed on most bikes: log the first traffic of
 // every connection at DEBUG so a default log shows it, the rest at VERBOSE.
-static constexpr uint32_t KM_DEBUG_LOGGED = 20;
+static constexpr uint32_t DEBUG_LOGGED = 20;
 static constexpr uint32_t KM_SUMMARY_INTERVAL_MS = 30000;
 static constexpr uint8_t KM_SWITCH_AFTER_POLLS = 5;
-static constexpr uint32_t KM_HANDSHAKE_TIMEOUT_MS = 2000;
+static constexpr uint32_t HANDSHAKE_TIMEOUT_MS = 2000;
 // Like the Tenways app, reconnect once the display answers with a second error.
 static constexpr uint32_t KM_AT_REPLIES_BEFORE_RECONNECT = 2;
-static constexpr size_t KM_MAX_FRAME_LEN = 256;
+static constexpr size_t MAX_FRAME_LEN = 256;
+// A CGO600 variant that sends no data this long after polling started gets the
+// encryption handshake.
+static constexpr uint32_t NUS_ENCRYPTION_AFTER_MS = 5000;
 static constexpr size_t MAX_LOGGED_BYTES = 64;
 // Connection parameters (units: 1.25 ms, 10 ms). Connect with a short interval
 // so service discovery is quick: the bike is often switched off seconds after
@@ -47,7 +50,7 @@ static constexpr uint16_t CONN_SUPERVISION_TIMEOUT = 1000;  // 10 s
 // Anything before 2020 means the clock has not been set by a time source yet.
 static constexpr time_t MIN_VALID_EPOCH = 1577836800;
 // Bump when protocol::BikeState changes layout; older data is then ignored.
-static constexpr uint32_t LAST_STATE_MAGIC = 0x43475301;
+static constexpr uint32_t LAST_STATE_MAGIC = 0x43475302;
 static constexpr uint32_t LAST_STATE_SAVE_INTERVAL_MS = 5 * 60 * 1000;
 
 static uint32_t epoch_now() {
@@ -115,7 +118,9 @@ void CGOComponent::dump_config() {
     LOG_SENSOR("  ", "Trip duration", this->trip_duration_sensor_);
     LOG_SENSOR("  ", "Remaining range", this->remaining_range_sensor_);
     LOG_SENSOR("  ", "Range", this->range_sensor_);
+    LOG_SENSOR("  ", "Power", this->power_sensor_);
     LOG_TEXT_SENSOR("  ", "Serial number", this->serial_number_text_sensor_);
+    LOG_TEXT_SENSOR("  ", "Firmware version", this->firmware_version_text_sensor_);
     LOG_TEXT_SENSOR("  ", "BLE status", this->ble_status_text_sensor_);
     LOG_SWITCH("  ", "Light", this->light_switch_);
 }
@@ -226,34 +231,32 @@ bool CGOComponent::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t
             if (param->notify.handle != this->tx_handle_)
                 break;
             const bool km = this->transport_ == Transport::KING_METER;
-            auto &stats = this->km_stats_;
+            auto &stats = this->link_stats_;
             const uint8_t *data = param->notify.value;
             size_t len = param->notify.value_len;
             if (km) {
                 ++stats.notifications;
                 stats.notification_bytes += len;
             }
-            this->log_bytes_("RX", param->notify.handle, data, len, km && stats.notifications <= KM_DEBUG_LOGGED);
-            uint8_t plain[KM_MAX_FRAME_LEN];
-            if (km) {
-                if (is_at_reply(data, len)) {
-                    this->handle_km_at_reply_(data, len);
+            this->log_bytes_("RX", param->notify.handle, data, len, km && stats.notifications <= DEBUG_LOGGED);
+            uint8_t plain[MAX_FRAME_LEN];
+            if (is_at_reply(data, len)) {
+                this->handle_at_reply_(data, len);
+                break;
+            }
+            if (this->handle_enc_handshake_reply_(data, len))
+                break;
+            if (this->enc_session_.active()) {
+                len = this->enc_session_.unwrap(data, len, plain, sizeof(plain));
+                if (len == 0) {
+                    ++stats.undecryptable;
+                    ESP_LOGW(TAG, "Could not decrypt a notification (%u this connection)",
+                             (unsigned) stats.undecryptable);
                     break;
                 }
-                if (this->handle_km_handshake_reply_(data, len))
-                    break;
-                if (this->km_session_.active()) {
-                    len = this->km_session_.unwrap(data, len, plain, sizeof(plain));
-                    if (len == 0) {
-                        ++stats.undecryptable;
-                        ESP_LOGW(TAG, "Could not decrypt a notification (%u this connection)",
-                                 (unsigned) stats.undecryptable);
-                        break;
-                    }
-                    data = plain;
-                    this->log_bytes_("RX decrypted", param->notify.handle, data, len,
-                                     stats.notifications <= KM_DEBUG_LOGGED);
-                }
+                data = plain;
+                this->log_bytes_("RX decrypted", param->notify.handle, data, len,
+                                 stats.notifications <= DEBUG_LOGGED);
             }
             bool saw_trip = false;
             bool changed;
@@ -264,8 +267,11 @@ bool CGOComponent::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t
                 if (km) {
                     changed = this->km_parser_.feed(this->state_, data, len, saw_trip, stats.bad_crc, stats.unhandled);
                 } else {
-                    changed = this->parser_.feed(this->state_, param->notify.value, param->notify.value_len,
-                                                 saw_trip, this->bad_crc_count_);
+                    changed = this->parser_.feed(this->state_, data, len, saw_trip, this->bad_crc_count_);
+                    if (this->state_.power_w >= 0 && !this->power_seen_) {
+                        this->power_seen_ = true;
+                        ESP_LOGD(TAG, "Bike reports its power, polling it");
+                    }
                 }
             }
             if (stats.bad_crc != bad_crc_before)
@@ -357,11 +363,11 @@ void CGOComponent::log_bytes_(const char *what, uint16_t handle, const uint8_t *
 
 void CGOComponent::log_km_summary_() {
     this->last_km_summary_ = millis();
-    const auto &s = this->km_stats_;
+    const auto &s = this->link_stats_;
     ESP_LOGI(TAG,
              "King Meter (%s): %u requests, %u notifications (%u bytes), %u frames, %u bad CRC, %u unhandled, "
              "%u bytes skipped, %u errors, %u undecryptable",
-             this->km_session_.active() ? "encrypted" : "unencrypted", (unsigned) s.requests,
+             this->enc_session_.active() ? "encrypted" : "unencrypted", (unsigned) s.requests,
              (unsigned) s.notifications, (unsigned) s.notification_bytes, (unsigned) this->km_parser_.frames(),
              (unsigned) s.bad_crc, (unsigned) s.unhandled, (unsigned) this->km_parser_.skipped_bytes(),
              (unsigned) s.at_replies, (unsigned) s.undecryptable);
@@ -391,7 +397,12 @@ void CGOComponent::loop() {
     } else if (this->phase_ == Phase::POLLING) {
         if (this->transport_ == Transport::KING_METER && now - this->last_km_summary_ >= KM_SUMMARY_INTERVAL_MS)
             this->log_km_summary_();
-        if (now - this->last_poll_ >= this->poll_interval_ms_) {
+        if (this->is_nus_variant_() && this->enc_handshake_ == EncHandshake::NONE &&
+            this->connect_started_ms_ != 0 && now - this->polling_started_ms_ >= NUS_ENCRYPTION_AFTER_MS) {
+            ESP_LOGI(TAG, "No data from the bike yet, trying the encryption handshake");
+            this->start_encryption_(now);
+        }
+        if (!this->encryption_pending_(now) && now - this->last_poll_ >= this->poll_interval_ms_) {
             this->last_poll_ = now;
             this->poll_();
         }
@@ -423,7 +434,12 @@ void CGOComponent::run_handshake_step_(uint32_t now) {
     };
     static constexpr uint8_t STEP_COUNT = sizeof(STEPS) / sizeof(STEPS[0]);
 
-    if (this->transport_ == Transport::KING_METER && this->run_km_handshake_(now))
+    if (this->transport_ == Transport::KING_METER && this->km_profile_->try_encryption &&
+        this->enc_handshake_ == EncHandshake::NONE) {
+        this->start_encryption_(now);
+        return;
+    }
+    if (this->encryption_pending_(now))
         return;
     if (this->transport_ == Transport::NUS && this->handshake_step_ < STEP_COUNT) {
         if (!this->write_(*STEPS[this->handshake_step_])) {
@@ -438,79 +454,91 @@ void CGOComponent::run_handshake_step_(uint32_t now) {
     this->finish_handshake_(now);
 }
 
-// Runs the encryption handshake of displays that need it. Returns true while
-// it is still waiting for the display.
-bool CGOComponent::run_km_handshake_(uint32_t now) {
-    if (!this->km_profile_->try_encryption)
-        return false;
-    switch (this->km_handshake_) {
-        case KmHandshake::NONE: {
-            esp_fill_random(this->km_app_random_, sizeof(this->km_app_random_));
-            uint8_t frame[protocol::km::HANDSHAKE_VALUE_LEN + 9];
-            const size_t len =
-                protocol::km::build_write(frame, protocol::km::KEY_HANDSHAKE_RANDOM, this->km_app_random_,
-                                          sizeof(this->km_app_random_), this->km_profile_->crc_low_first);
-            ESP_LOGD(TAG, "Starting the encryption handshake");
-            this->km_write_with_response_ = true;
-            this->km_handshake_ = KmHandshake::WAIT_RANDOM;
-            this->km_handshake_deadline_ = now + KM_HANDSHAKE_TIMEOUT_MS;
-            if (!this->write_km_frame_(frame, len))
-                ESP_LOGW(TAG, "Handshake write failed");
-            return true;
-        }
-        case KmHandshake::WAIT_RANDOM:
-        case KmHandshake::WAIT_IV:
-            if ((int32_t) (now - this->km_handshake_deadline_) < 0)
-                return true;
-            ESP_LOGI(TAG, "No reply to the encryption handshake, continuing unencrypted");
-            this->km_write_with_response_ = false;
-            this->km_handshake_ = KmHandshake::DONE;
-            return false;
-        case KmHandshake::DONE:
-        default:
-            return false;
+// The CGO600 family members other than the CGO600 itself, which the Tenways
+// app can also run encrypted.
+bool CGOComponent::is_nus_variant_() const {
+    return this->transport_ == Transport::NUS && this->bike_name_.rfind("CGO600", 0) == 0 &&
+           this->bike_name_ != "CGO600";
+}
+
+void CGOComponent::start_encryption_(uint32_t now) {
+    namespace km = protocol::km;
+    esp_fill_random(this->enc_app_random_, sizeof(this->enc_app_random_));
+    uint8_t frame[protocol::HANDSHAKE_VALUE_LEN + 9];
+    size_t len;
+    if (this->transport_ == Transport::KING_METER) {
+        len = km::build_write(frame, protocol::KEY_HANDSHAKE_RANDOM, this->enc_app_random_,
+                              sizeof(this->enc_app_random_), this->km_profile_->crc_low_first);
+        this->enc_write_with_response_ = true;
+    } else {
+        len = protocol::build_write(frame, protocol::KEY_HANDSHAKE_RANDOM, this->enc_app_random_,
+                                    sizeof(this->enc_app_random_));
     }
+    ESP_LOGD(TAG, "Starting the encryption handshake");
+    this->enc_handshake_ = EncHandshake::WAIT_RANDOM;
+    this->enc_deadline_ = now + HANDSHAKE_TIMEOUT_MS;
+    if (!this->send_frame_(frame, len))
+        ESP_LOGW(TAG, "Handshake write failed");
+}
+
+// True while the handshake waits for the display; gives up at the deadline.
+bool CGOComponent::encryption_pending_(uint32_t now) {
+    if (this->enc_handshake_ != EncHandshake::WAIT_RANDOM && this->enc_handshake_ != EncHandshake::WAIT_IV)
+        return false;
+    if ((int32_t) (now - this->enc_deadline_) < 0)
+        return true;
+    ESP_LOGI(TAG, "No reply to the encryption handshake, continuing unencrypted");
+    this->enc_write_with_response_ = false;
+    this->enc_handshake_ = EncHandshake::DONE;
+    return false;
 }
 
 // Consumes the display's handshake replies: its random, then the IV.
-bool CGOComponent::handle_km_handshake_reply_(const uint8_t *data, size_t len) {
+bool CGOComponent::handle_enc_handshake_reply_(const uint8_t *data, size_t len) {
     namespace km = protocol::km;
-    if (this->km_handshake_ == KmHandshake::WAIT_RANDOM) {
-        const uint8_t *device_random = km::handshake_value(data, len, km::TYPE_WRITE, km::KEY_HANDSHAKE_RANDOM);
+    const bool nus = this->transport_ == Transport::NUS;
+    if (this->enc_handshake_ == EncHandshake::WAIT_RANDOM) {
+        const uint8_t *device_random =
+            nus ? protocol::nus_handshake_value(data, len, protocol::FRAME_WRITE, protocol::KEY_HANDSHAKE_RANDOM)
+                : protocol::km_handshake_value(data, len, km::TYPE_WRITE, protocol::KEY_HANDSHAKE_RANDOM);
         if (device_random == nullptr)
             return false;
-        if (!km::derive_session_key(this->km_app_random_, device_random, this->km_session_key_)) {
+        if (!protocol::derive_session_key(this->enc_app_random_, device_random, this->enc_session_key_)) {
             ESP_LOGW(TAG, "Deriving the session key failed, continuing unencrypted");
-            this->km_write_with_response_ = false;
-            this->km_handshake_ = KmHandshake::DONE;
+            this->enc_write_with_response_ = false;
+            this->enc_handshake_ = EncHandshake::DONE;
             return true;
         }
         ESP_LOGD(TAG, "Got the display's random, requesting the IV");
-        static const uint8_t IV_KEYS[] = {km::KEY_HANDSHAKE_IV};
-        this->km_handshake_ = KmHandshake::WAIT_IV;
-        this->km_handshake_deadline_ = millis() + KM_HANDSHAKE_TIMEOUT_MS;
-        if (!this->write_km_read_(IV_KEYS, sizeof(IV_KEYS)))
+        static const uint8_t IV_KEYS[] = {protocol::KEY_HANDSHAKE_IV};
+        this->enc_handshake_ = EncHandshake::WAIT_IV;
+        this->enc_deadline_ = millis() + HANDSHAKE_TIMEOUT_MS;
+        const bool ok = nus ? this->write_nus_read_(IV_KEYS, sizeof(IV_KEYS))
+                            : this->write_km_read_(IV_KEYS, sizeof(IV_KEYS));
+        if (!ok)
             ESP_LOGW(TAG, "IV request failed");
         return true;
     }
-    if (this->km_handshake_ == KmHandshake::WAIT_IV) {
-        const uint8_t *iv = km::handshake_value(data, len, km::TYPE_READ, km::KEY_HANDSHAKE_IV);
+    if (this->enc_handshake_ == EncHandshake::WAIT_IV) {
+        const uint8_t *iv =
+            nus ? protocol::nus_handshake_value(data, len, protocol::FRAME_START, protocol::KEY_HANDSHAKE_IV)
+                : protocol::km_handshake_value(data, len, km::TYPE_READ, protocol::KEY_HANDSHAKE_IV);
         if (iv == nullptr)
             return false;
-        this->km_session_.start(this->km_session_key_, iv);
-        this->km_handshake_ = KmHandshake::DONE;
+        this->enc_session_.start(this->enc_session_key_, iv);
+        this->enc_handshake_ = EncHandshake::DONE;
         ESP_LOGI(TAG, "Encrypted session established");
         return true;
     }
     return false;
 }
 
-void CGOComponent::handle_km_at_reply_(const uint8_t *data, size_t len) {
+void CGOComponent::handle_at_reply_(const uint8_t *data, size_t len) {
     // A display that does not expect the handshake can reject it like this.
-    if (this->km_handshake_ == KmHandshake::WAIT_RANDOM) {
+    if (this->enc_handshake_ == EncHandshake::WAIT_RANDOM) {
         ESP_LOGI(TAG, "Display rejected the encryption handshake, continuing unencrypted");
-        this->km_write_with_response_ = false;
-        this->km_handshake_ = KmHandshake::DONE;
+        this->enc_write_with_response_ = false;
+        this->enc_handshake_ = EncHandshake::DONE;
         return;
     }
     char text[48];
@@ -518,9 +546,13 @@ void CGOComponent::handle_km_at_reply_(const uint8_t *data, size_t len) {
     for (size_t i = 0; i < len && n < sizeof(text) - 1 && data[i] >= 0x20 && data[i] < 0x7F; i++)
         text[n++] = (char) data[i];
     text[n] = '\0';
-    const uint32_t count = ++this->km_stats_.at_replies;
+    const uint32_t count = ++this->link_stats_.at_replies;
     ESP_LOGW(TAG, "Display reported an error: %s (%u this connection)", text, (unsigned) count);
-    if (count >= KM_AT_REPLIES_BEFORE_RECONNECT) {
+    if (this->is_nus_variant_() && this->enc_handshake_ == EncHandshake::NONE && this->phase_ == Phase::POLLING) {
+        this->start_encryption_(millis());
+        return;
+    }
+    if (this->transport_ == Transport::KING_METER && count >= KM_AT_REPLIES_BEFORE_RECONNECT) {
         ESP_LOGW(TAG, "Reconnecting to clear the display error");
         this->disconnect();
     }
@@ -531,6 +563,13 @@ void CGOComponent::finish_handshake_(uint32_t now) {
     this->phase_ = Phase::POLLING;
     this->last_poll_ = now;
     this->last_km_summary_ = now;
+    this->polling_started_ms_ = now;
+    if (this->transport_ == Transport::NUS) {
+        // A power value stored from an earlier session must not count as the
+        // bike answering this session's power read.
+        LockGuard guard(this->state_mutex_);
+        this->state_.power_w = -1;
+    }
     ESP_LOGI(TAG, "Handshake complete, polling every %u ms", (unsigned) this->poll_interval_ms_);
     const uint32_t connected_at = epoch_now();
     if (connected_at != 0) {
@@ -546,10 +585,15 @@ void CGOComponent::request_static_fields_() {
     if (this->transport_ == Transport::KING_METER) {
         ok = this->write_km_read_(this->km_profile_->info_keys, this->km_profile_->info_count);
     } else {
-        static const uint8_t FIELDS[] = {protocol::FIELD_SN};
-        uint8_t cmd[sizeof(FIELDS) + 5];
-        const size_t len = protocol::build_request(cmd, FIELDS, sizeof(FIELDS));
-        ok = this->write_(cmd, len);
+        // Separate requests, so a bike that does not know one of the fields
+        // still answers the others. Not every CGO600 reports its power; ask
+        // until it answers once.
+        static const uint8_t SERIAL[] = {protocol::FIELD_SN};
+        static const uint8_t FIRMWARE[] = {protocol::FIELD_FIRMWARE};
+        static const uint8_t POWER[] = {protocol::FIELD_POWER};
+        ok = this->write_nus_read_(SERIAL, sizeof(SERIAL)) && this->write_nus_read_(FIRMWARE, sizeof(FIRMWARE));
+        if (ok && !this->power_seen_)
+            ok = this->write_nus_read_(POWER, sizeof(POWER));
     }
     if (!ok)
         ESP_LOGW(TAG, "Static field request failed");
@@ -560,7 +604,7 @@ void CGOComponent::poll_() {
     if (this->transport_ == Transport::KING_METER) {
         // A display ignores requests in the other layout, so a bike whose name
         // did not pick the right one (or that advertises none) gets both tried.
-        if (this->km_parser_.frames() == 0 && !this->km_session_.active() && this->km_stats_.at_replies == 0 &&
+        if (this->km_parser_.frames() == 0 && !this->enc_session_.active() && this->link_stats_.at_replies == 0 &&
             ++this->km_unanswered_polls_ > KM_SWITCH_AFTER_POLLS) {
             this->km_unanswered_polls_ = 0;
             this->km_profile_ = this->km_profile_ == &protocol::km::CGO800_PROFILE ? &protocol::km::LONGTAIL_PROFILE
@@ -570,28 +614,48 @@ void CGOComponent::poll_() {
         }
         ok = this->write_km_read_(this->km_profile_->status_keys, this->km_profile_->status_count);
     } else {
-        ok = this->write_(protocol::READ_DATA_CMD);
+        bool status_has_power = false;
+        if (this->is_nus_variant_() || this->enc_session_.active()) {
+            // The status request of the Tenways app; only the CGO600 PLUS gets
+            // the trailing power field.
+            static const uint8_t STATUS[] = {0x07, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16,
+                                             0x17, 0x21, 0x1A, 0x2D, protocol::FIELD_POWER};
+            status_has_power = this->bike_name_.rfind("CGO600 PLUS", 0) == 0;
+            ok = this->write_nus_read_(STATUS, status_has_power ? sizeof(STATUS) : sizeof(STATUS) - 1);
+        } else {
+            ok = this->send_frame_(protocol::READ_DATA_CMD.data, protocol::READ_DATA_CMD.len);
+        }
+        static const uint8_t POWER[] = {protocol::FIELD_POWER};
+        if (ok && this->power_seen_ && !status_has_power)
+            ok = this->write_nus_read_(POWER, sizeof(POWER));
     }
     if (!ok)
         ESP_LOGW(TAG, "Poll write failed");
+}
+
+bool CGOComponent::write_nus_read_(const uint8_t *fields, uint8_t count) {
+    uint8_t cmd[MAX_WRITE_LEN];
+    if (count + 5u > sizeof(cmd))
+        return false;
+    return this->send_frame_(cmd, protocol::build_request(cmd, fields, count));
 }
 
 bool CGOComponent::write_km_read_(const uint8_t *keys, uint8_t count) {
     uint8_t cmd[MAX_WRITE_LEN];
     if (count + protocol::km::OVERHEAD + 1 > sizeof(cmd))
         return false;
-    return this->write_km_frame_(cmd, protocol::km::build_read(cmd, keys, count, this->km_profile_->crc_low_first));
+    return this->send_frame_(cmd, protocol::km::build_read(cmd, keys, count, this->km_profile_->crc_low_first));
 }
 
-bool CGOComponent::write_km_frame_(const uint8_t *frame, size_t len) {
-    if (!this->km_session_.active())
-        return this->write_(frame, len, this->km_write_with_response_);
+bool CGOComponent::send_frame_(const uint8_t *frame, size_t len) {
+    if (!this->enc_session_.active())
+        return this->write_(frame, len, this->enc_write_with_response_);
     uint8_t packet[MAX_WRITE_LEN];
-    const size_t packet_len = this->km_session_.wrap(frame, len, packet, sizeof(packet));
+    const size_t packet_len = this->enc_session_.wrap(frame, len, packet, sizeof(packet));
     if (packet_len == 0)
         return false;
-    this->log_bytes_("TX plain", this->rx_handle_, frame, len, this->km_stats_.requests < KM_DEBUG_LOGGED);
-    return this->write_(packet, packet_len, true);
+    this->log_bytes_("TX plain", this->rx_handle_, frame, len, this->link_stats_.requests < DEBUG_LOGGED);
+    return this->write_(packet, packet_len, this->enc_write_with_response_);
 }
 
 bool CGOComponent::write_(const protocol::Command &cmd) { return this->write_(cmd.data, cmd.len); }
@@ -614,8 +678,8 @@ bool CGOComponent::write_(const uint8_t *data, size_t len, bool with_response) {
                                        ESP_GATT_WRITE_TYPE_RSP, ESP_GATT_AUTH_REQ_NONE);
     }
     if (err == ESP_OK && this->transport_ == Transport::KING_METER) {
-        ++this->km_stats_.requests;
-        this->log_bytes_("TX", this->rx_handle_, data, len, this->km_stats_.requests <= KM_DEBUG_LOGGED);
+        ++this->link_stats_.requests;
+        this->log_bytes_("TX", this->rx_handle_, data, len, this->link_stats_.requests <= DEBUG_LOGGED);
     }
     return err == ESP_OK;
 }
@@ -628,10 +692,11 @@ bool CGOComponent::set_light(bool on) {
     bool ok;
     if (this->transport_ == Transport::KING_METER) {
         uint8_t cmd[10];
-        ok = this->write_km_frame_(cmd, protocol::km::build_write(cmd, protocol::km::KEY_LIGHT, on ? 1 : 0,
-                                                                  this->km_profile_->crc_low_first));
+        ok = this->send_frame_(cmd, protocol::km::build_write(cmd, protocol::km::KEY_LIGHT, on ? 1 : 0,
+                                                              this->km_profile_->crc_low_first));
     } else {
-        ok = this->write_(on ? protocol::LIGHT_ON_CMD : protocol::LIGHT_OFF_CMD);
+        const auto &cmd = on ? protocol::LIGHT_ON_CMD : protocol::LIGHT_OFF_CMD;
+        ok = this->send_frame_(cmd.data, cmd.len);
     }
     if (!ok) {
         ESP_LOGW(TAG, "Light write failed");
@@ -676,6 +741,8 @@ void CGOComponent::reset_session_() {
             LockGuard guard(this->state_mutex_);
             if (this->state_.speed_kmh > 0)
                 this->state_.speed_kmh = 0;
+            if (this->state_.power_w > 0)
+                this->state_.power_w = 0;
         }
         this->publish_state_();
         this->last_state_dirty_ = true;
@@ -686,17 +753,18 @@ void CGOComponent::reset_session_() {
     this->transport_ = Transport::NONE;
     this->km_profile_ = nullptr;
     this->km_unanswered_polls_ = 0;
+    this->power_seen_ = false;
     this->handshake_step_ = 0;
     this->tx_handle_ = 0;
     this->rx_handle_ = 0;
     this->cccd_handle_ = 0;
     this->cccd_confirmed_ = false;
-    this->km_stats_ = {};
-    this->km_handshake_ = KmHandshake::NONE;
-    this->km_write_with_response_ = false;
-    this->km_session_.reset();
-    memset(this->km_app_random_, 0, sizeof(this->km_app_random_));
-    memset(this->km_session_key_, 0, sizeof(this->km_session_key_));
+    this->link_stats_ = {};
+    this->enc_handshake_ = EncHandshake::NONE;
+    this->enc_write_with_response_ = false;
+    this->enc_session_.reset();
+    memset(this->enc_app_random_, 0, sizeof(this->enc_app_random_));
+    memset(this->enc_session_key_, 0, sizeof(this->enc_session_key_));
     this->parser_.reset();
     this->km_parser_.reset();
 }
@@ -750,10 +818,15 @@ void CGOComponent::publish_state_() {
     publish_if_changed(this->trip_duration_sensor_, s.trip_duration);
     publish_if_changed(this->remaining_range_sensor_, s.remaining_range_km);
     publish_if_changed(this->range_sensor_, s.total_range_km);
+    publish_if_changed(this->power_sensor_, s.power_w);
 
     if (this->serial_number_text_sensor_ != nullptr && s.serial_number[0] != '\0' &&
         this->serial_number_text_sensor_->state != s.serial_number) {
         this->serial_number_text_sensor_->publish_state(s.serial_number);
+    }
+    if (this->firmware_version_text_sensor_ != nullptr && s.firmware[0] != '\0' &&
+        this->firmware_version_text_sensor_->state != s.firmware) {
+        this->firmware_version_text_sensor_->publish_state(s.firmware);
     }
     if (this->light_switch_ != nullptr && s.light_valid) {
         const bool pending = (int32_t) (millis() - this->light_pending_until_) < 0;
