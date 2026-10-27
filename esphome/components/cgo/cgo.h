@@ -148,6 +148,9 @@ class CGOComponent : public esp32_ble_client::BLEClientBase {
     bool power_seen_{false};
     // Encrypted displays are written with response, as the Tenways app does.
     bool enc_write_with_response_{false};
+    // Models the app always writes with response: some by profile, and every
+    // model whose name ends in _D.
+    bool km_write_with_response_{false};
     uint8_t enc_app_random_[protocol::HANDSHAKE_VALUE_LEN]{};
     uint8_t enc_session_key_[32]{};
     protocol::Session enc_session_;

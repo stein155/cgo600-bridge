@@ -10,7 +10,13 @@ ESP32 firmware, built on [ESPHome](https://esphome.io), that reads live telemetr
 |---|---|
 | CGO600 | **Supported** |
 | CGO600 Pro, CGO600 PLUS, CGO600 Pro-C, CGO600 Pro_T | **Experimental**, untested |
-| CGO800, CGO800 Plus and other bikes with a King Meter display | **Experimental**, untested |
+| CGO800S, CGO800 Plus | **Experimental**: connects, data not confirmed yet |
+| CGO009, CGO009L, CGO009_D | **Experimental**, untested |
+| Longtail Duo, Longtail Duo_D | **Experimental**, untested |
+| AGO AIR, AGO AIR-BELT_D, Wayfarer_B, CGO600_D | **Experimental**, untested |
+| AGO, AGOX, AGOT, CARGO, CGO COMPACT_D, CGO001 | **Experimental**, untested |
+| DM | Not supported |
+| Bosch Smart System bikes | Not supported (own Bosch protocol) |
 
 Only the CGO600 is supported. The other bikes are detected automatically and get the requests the Tenways app uses for them, including its encrypted mode, but reading data and light control have not been confirmed on any of them yet. Logs from such a bike are very welcome in [issue #2](https://github.com/stein155/cgo600-bridge/issues/2).
 
@@ -70,7 +76,7 @@ esp32_ble_tracker:
     window: 160ms
 
 cgo:
-  device_names: [CGO600, CGO800]  # part of the advertised name, any case (default: CGO600, CGO800)
+  device_names: [CGO600]          # part of the advertised name, any case (default: every Tenways model)
   poll_interval: 1s               # 500ms to 10s (default: 1s)
   max_rides: 50                   # rides kept on the device, 1 to 50 (default: 20)
 
@@ -186,33 +192,44 @@ The checksum is CRC-16/MODBUS (polynomial `0xA001` reflected, initial value `0xF
 | `0x1A` | Battery | uint8 → % |
 | `0x21` | Light | uint8 (0 = off, 1 = on) |
 
-### King Meter (CGO800)
+### King Meter (CGO800 and others)
 
-Newer displays expose a King Meter service (`43480001-f001-4b49-4e47-204d45544552`) instead of NUS. Requests are written to `43480002-…`; replies arrive as notifications on `43480003-…`. The Longtail Duo layout comes from [tenways-ble](https://github.com/Styx85/tenways-ble), which captured it from the Tenways app; the CGO800 layout follows how the Tenways app talks to that model.
+Newer displays expose a King Meter service (`43480001-f001-4b49-4e47-204d45544552`) instead of NUS. Requests are written to `43480002-…`; replies arrive as notifications on `43480003-…`. The bridge has a profile for each driver in the Tenways app and follows how the app talks to each model; the Longtail Duo layout was first captured by [tenways-ble](https://github.com/Styx85/tenways-ble).
 
 ```
 [type] 0x00 [len] [count] [payload...] [CRC16] [CRC16] 0x45
 ```
 
-`type` is `0x62` (read) or `0x63` (write), `len` counts `count` and the payload, and `count` is the number of keys. A read request lists keys; the reply carries `[key] [size] [value]` entries with big-endian values. A write carries one `[key] [size] [value]` entry. The checksum is the same CRC-16/MODBUS. The Longtail Duo sends it high byte first, the CGO800 low byte first, and a display ignores requests in the wrong order. The bridge picks the layout from the advertised name and tries the other one when the bike does not answer.
+`type` is `0x62` (read) or `0x63` (write), `len` counts `count` and the payload, and `count` is the number of keys. A read request lists keys; the reply carries `[key] [size] [value]` entries with big-endian values. A write carries one `[key] [size] [value]` entry. The checksum is the same CRC-16/MODBUS. The CGO800 sends it low byte first, every other King Meter model high byte first, and a display ignores requests in the wrong order.
+
+| Profile | Models (advertised name starts with) | Info keys | Status keys |
+|---|---|---|---|
+| CGO800 | `CGO800` | `04 05` | `05 06 07 08 09 0A 0B 0C 0F 11 23` |
+| CGO009 | `CGO009` | `04 05 70 4F 50` | `06 07 08 09 11 12 0A 0B 0C 0F 23 4F 50` |
+| Longtail Duo | `Longtail Duo` | `04 05 4F 70` | `06 07 08 09 11 0A 0B 0C 0F 23 4F` |
+| AGO AIR | `AGO AIR`, `Wayfarer_B`, `CGO600_D` | `04 05 4F 76` | as Longtail Duo |
+| AGO | anything else, and bikes without a name | `04 05` | `05 06 07 08 09 11 0A 0B 0C 0F 23` |
+
+AGO AIR models and every model whose name ends in `_D` are written with response, like the app does. When a bike does not answer, the bridge first tries the encryption handshake and then the other CRC order.
 
 | Key | Field | Decoding |
 |---|---|---|
-| `0x05` | Serial number (CGO800) | ASCII string |
+| `0x04` | Firmware version | dotted bytes (`01 02 03` = 1.2.3); CGO800: ASCII |
+| `0x05` | Serial number | ASCII string |
 | `0x06` | Speed | uint16 ÷ 10 → km/h |
 | `0x07` | Max speed | uint16 ÷ 10 → km/h |
 | `0x08` | Average speed | uint16 ÷ 10 → km/h |
 | `0x09` | Trip distance | uint32 ÷ 10 → km |
 | `0x0A` | Ride time | uint32 → seconds |
-| `0x0B` | Remaining range | uint16 → km (any byte ≥ `0x80` = none) |
-| `0x0C` | Total range (odometer) | uint32 ÷ 10 → km |
+| `0x0B` | Remaining range | uint16 → km; 655 or 32767 = none (CGO800: any byte ≥ `0x80` = none) |
+| `0x0C` | Total range (odometer) | uint32 ÷ 10 → km (CGO800: whole km) |
 | `0x0F` | Battery | uint8 → % |
 | `0x11` | Light | uint8 (0 = off, 1 = on); written to switch the light |
-| `0x70` | Serial number (Longtail Duo) | ASCII string |
+| `0x23` | Power | uint16 → W (above 3000 ignored) |
 
 #### Encryption
 
-Some displays (seen on the CGO800 Plus) answer plain requests only with an `AT+NAME=…` error and expect an encrypted session first. The bridge tries this handshake on CGO800 bikes and continues unencrypted when the display does not reply to it:
+Some displays (seen on the CGO800 Plus) answer plain requests only with an `AT+NAME=…` error and expect an encrypted session first. The bridge tries this handshake first on CGO800 bikes, and on other bikes when they do not answer or report such an error; it continues unencrypted when the display does not reply to it:
 
 1. The bridge writes 16 random bytes under key `0xD8`; the display replies with its own 16 random bytes under the same key.
 2. Both sides derive a 32-byte AES key with HKDF-SHA256: the bridge's random is the salt, a fixed secret from the Tenways app the input key, and the display's random the info.
