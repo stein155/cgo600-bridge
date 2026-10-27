@@ -46,6 +46,31 @@ size_t build_request(uint8_t *out, const uint8_t *field_ids, size_t count) {
     return 5 + count;
 }
 
+size_t build_write(uint8_t *out, uint8_t field_id, const uint8_t *value, uint8_t size) {
+    out[0] = FRAME_WRITE;
+    out[1] = size + 2;
+    out[2] = field_id;
+    out[3] = size;
+    memcpy(out + 4, value, size);
+    const uint16_t crc = crc16(out, 4 + size);
+    out[4 + size] = crc & 0xFF;
+    out[5 + size] = (crc >> 8) & 0xFF;
+    out[6 + size] = FRAME_END;
+    return 7 + size;
+}
+
+static void copy_ascii(char *out, size_t out_size, const uint8_t *data, uint8_t len) {
+    size_t j = 0;
+    for (uint8_t i = 0; i < len && j < out_size - 1; i++) {
+        if (data[i] >= 32 && data[i] <= 126)
+            out[j++] = (char) data[i];
+    }
+    out[j] = '\0';
+}
+
+// Upper bound the Tenways app accepts for the motor power.
+static constexpr uint32_t MAX_PLAUSIBLE_POWER_W = 3000;
+
 static uint32_t int_be(const uint8_t *data, uint8_t len) {
     uint32_t value = 0;
     for (uint8_t i = 0; i < len; i++) {
@@ -56,14 +81,17 @@ static uint32_t int_be(const uint8_t *data, uint8_t len) {
 
 bool decode_field(BikeState &state, uint8_t field_id, const uint8_t *data, uint8_t len) {
     switch (field_id) {
-        case FIELD_SN: {
-            size_t j = 0;
-            for (uint8_t i = 0; i < len && j < sizeof(state.serial_number) - 1; i++) {
-                if (data[i] >= 32 && data[i] <= 126) {
-                    state.serial_number[j++] = (char) data[i];
-                }
-            }
-            state.serial_number[j] = '\0';
+        case FIELD_SN:
+            copy_ascii(state.serial_number, sizeof(state.serial_number), data, len);
+            return true;
+        case FIELD_FIRMWARE:
+            copy_ascii(state.firmware, sizeof(state.firmware), data, len);
+            return true;
+        case FIELD_POWER: {
+            const uint32_t watts = int_be(data, len);
+            if (len == 0 || watts > MAX_PLAUSIBLE_POWER_W)
+                return false;
+            state.power_w = (int) watts;
             return true;
         }
         case FIELD_BATTERY:
@@ -261,6 +289,7 @@ static constexpr uint8_t KEY_RIDE_TIME = 0x0A;
 static constexpr uint8_t KEY_REMAINING_RANGE = 0x0B;
 static constexpr uint8_t KEY_ODOMETER = 0x0C;
 static constexpr uint8_t KEY_BATTERY = 0x0F;
+static constexpr uint8_t KEY_POWER = 0x23;
 static constexpr uint8_t KEY_SERIAL = 0x70;
 
 // Several keys collide with CGO600 field IDs (0x11 is the light here but the
@@ -287,6 +316,8 @@ static uint8_t to_field_id(uint8_t key) {
             return FIELD_TOTAL_RANGE;
         case KEY_BATTERY:
             return FIELD_BATTERY;
+        case KEY_POWER:
+            return FIELD_POWER;
         case KEY_LIGHT:
             return FIELD_LIGHT;
         default:

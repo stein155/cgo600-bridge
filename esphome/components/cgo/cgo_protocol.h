@@ -12,6 +12,7 @@ static constexpr uint8_t FRAME_START = 0x52;
 static constexpr uint8_t FRAME_END = 0x45;
 
 // Field IDs inferred from the Tenways app protocol
+static constexpr uint8_t FIELD_FIRMWARE = 0x03;
 static constexpr uint8_t FIELD_SN = 0x07;
 static constexpr uint8_t FIELD_SPEED = 0x11;
 static constexpr uint8_t FIELD_MAX_SPEED = 0x12;
@@ -22,6 +23,8 @@ static constexpr uint8_t FIELD_REMAINING_RANGE = 0x16;
 static constexpr uint8_t FIELD_TOTAL_RANGE = 0x17;
 static constexpr uint8_t FIELD_BATTERY = 0x1A;
 static constexpr uint8_t FIELD_LIGHT = 0x21;
+static constexpr uint8_t FIELD_POWER = 0x23;
+static constexpr uint8_t FRAME_WRITE = 0x57;
 
 struct Command {
     const uint8_t *data;
@@ -47,12 +50,16 @@ struct BikeState {
     bool light_on = false;
     bool light_valid = false;
     char serial_number[32] = {0};
+    int power_w = -1;
+    char firmware[16] = {0};
 };
 
 uint16_t crc16(const uint8_t *data, size_t len);
 
 // Builds a read request for the given field IDs; out must hold count + 5 bytes.
 size_t build_request(uint8_t *out, const uint8_t *field_ids, size_t count);
+// Builds a write that sets one field; out must hold size + 6 bytes.
+size_t build_write(uint8_t *out, uint8_t field_id, const uint8_t *value, uint8_t size);
 
 // Decodes one field into state. Returns false when the field is unknown or
 // the value is implausible and was ignored.

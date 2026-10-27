@@ -96,11 +96,15 @@ sensor:
       name: Remaining range
     range:
       name: Total range
+    power:
+      name: Power
 
 text_sensor:
   - platform: cgo
     serial_number:
       name: Serial number
+    firmware_version:
+      name: Firmware version
     ble_status:
       name: BLE status
 

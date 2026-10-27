@@ -5,12 +5,14 @@ from esphome.const import (
     DEVICE_CLASS_BATTERY,
     DEVICE_CLASS_DISTANCE,
     DEVICE_CLASS_DURATION,
+    DEVICE_CLASS_POWER,
     DEVICE_CLASS_SPEED,
     STATE_CLASS_MEASUREMENT,
     UNIT_KILOMETER,
     UNIT_KILOMETER_PER_HOUR,
     UNIT_PERCENT,
     UNIT_SECOND,
+    UNIT_WATT,
 )
 
 from . import CGO_CHILD_SCHEMA, CONF_CGO_ID
@@ -59,6 +61,12 @@ SENSORS = {
     ),
     "remaining_range": _distance("mdi:map-marker-radius"),
     "range": _distance("mdi:map-marker-distance"),
+    "power": sensor.sensor_schema(
+        unit_of_measurement=UNIT_WATT,
+        device_class=DEVICE_CLASS_POWER,
+        state_class=STATE_CLASS_MEASUREMENT,
+        accuracy_decimals=0,
+    ),
 }
 
 CONFIG_SCHEMA = CGO_CHILD_SCHEMA.extend(

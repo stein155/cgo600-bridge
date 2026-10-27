@@ -12,6 +12,10 @@ TEXT_SENSORS = {
         icon="mdi:identifier",
         entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
     ),
+    "firmware_version": text_sensor.text_sensor_schema(
+        icon="mdi:chip",
+        entity_category=ENTITY_CATEGORY_DIAGNOSTIC,
+    ),
     "ble_status": text_sensor.text_sensor_schema(
         icon=ICON_BLUETOOTH,
         entity_category=ENTITY_CATEGORY_DIAGNOSTIC,

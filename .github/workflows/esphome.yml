@@ -6,14 +6,27 @@ on:
     paths:
       - 'esphome/**'
       - 'installer/local_esphome_config.py'
+      - 'tests/**'
       - '.github/workflows/esphome.yml'
   pull_request:
     paths:
       - 'esphome/**'
       - 'installer/local_esphome_config.py'
+      - 'tests/**'
       - '.github/workflows/esphome.yml'
 
 jobs:
+  protocol-tests:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install mbedtls
+        run: sudo apt-get update && sudo apt-get install -y libmbedtls-dev
+
+      - name: Run protocol tests
+        run: tests/run.sh
+
   compile:
     runs-on: ubuntu-latest
     steps:

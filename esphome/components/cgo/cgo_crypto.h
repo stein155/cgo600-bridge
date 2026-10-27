@@ -1,9 +1,9 @@
 #pragma once
 
-// Session encryption of the King Meter transport. Displays the Tenways server
-// marks as encrypted (seen on the CGO800 Plus) answer nothing but an AT+NAME
-// error until the app has run a key exchange; after it every frame travels
-// inside an AES-256-CBC packet:
+// Session encryption used by bikes the Tenways server marks as encrypted, on
+// both the King Meter and the Nordic UART transport. Such a display (seen on
+// the CGO800 Plus) answers nothing but an AT+NAME error until the app has run
+// a key exchange; after it every frame travels inside an AES-256-CBC packet:
 //   0xA5 [0x80 | len_hi] [len_lo] [seq_hi] [seq_lo] [ciphertext] [crc_hi] [crc_lo] 0x5A
 // len is the ciphertext length, seq counts packets from 1 and the CRC is
 // CRC-16/MODBUS over 0xA5..ciphertext. All packets use the session IV.
@@ -11,7 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace esphome::cgo::protocol::km {
+namespace esphome::cgo::protocol {
 
 static constexpr uint8_t KEY_HANDSHAKE_RANDOM = 0xD8;
 static constexpr uint8_t KEY_HANDSHAKE_IV = 0xD2;
@@ -24,7 +24,10 @@ bool derive_session_key(const uint8_t app_random[16], const uint8_t device_rando
 
 // Returns the 16-byte value of a handshake reply
 // ([type] 0x00 [len] 0x01 [key] 0x10 [value...]), or nullptr for other frames.
-const uint8_t *handshake_value(const uint8_t *data, size_t len, uint8_t type, uint8_t key);
+const uint8_t *km_handshake_value(const uint8_t *data, size_t len, uint8_t type, uint8_t key);
+// The same for the Nordic UART framing of the CGO600 family
+// ([type] [len] [key] 0x10 [value...]).
+const uint8_t *nus_handshake_value(const uint8_t *data, size_t len, uint8_t type, uint8_t key);
 
 class Session {
  public:
@@ -45,4 +48,4 @@ class Session {
     bool active_{false};
 };
 
-}  // namespace esphome::cgo::protocol::km
+}  // namespace esphome::cgo::protocol
