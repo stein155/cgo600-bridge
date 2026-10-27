@@ -2,9 +2,16 @@
 
 ESP32 firmware, built on [ESPHome](https://esphome.io), that reads live telemetry from a **Tenways CGO600** e-bike over Bluetooth Low Energy and brings it into **Home Assistant**. The bridge also serves its own multilingual web dashboard (installable as a PWA) for live monitoring, light control and a ride history. Once installed, no computer is needed.
 
-> **CGO800 (experimental):** bikes whose display uses the King Meter BLE service, such as the CGO800 Plus, are detected automatically. Reading data and light control have not been confirmed on a CGO800 yet. Logs from a CGO800 are very welcome in [issue #2](https://github.com/stein155/cgo600-bridge/issues/2).
-
 > "TENWAYS" and "CGO600" are trademarks of TENWAYS. This is an unofficial community project, not affiliated with or endorsed by TENWAYS — use at your own risk.
+
+## Supported bikes
+
+| Bike | Status |
+|---|---|
+| CGO600 | **Supported** |
+| CGO800, CGO800 Plus and other bikes with a King Meter display | **Experimental**, untested |
+
+Only the CGO600 is supported. Bikes whose display uses the King Meter BLE service are detected automatically, but reading data and light control have not been confirmed on any of them yet. Logs from such a bike are very welcome in [issue #2](https://github.com/stein155/cgo600-bridge/issues/2).
 
 ## Motivation
 
@@ -201,7 +208,24 @@ Newer displays expose a King Meter service (`43480001-f001-4b49-4e47-204d4554455
 | `0x11` | Light | uint8 (0 = off, 1 = on); written to switch the light |
 | `0x70` | Serial number (Longtail Duo) | ASCII string |
 
-The first 20 requests and notifications of every King Meter connection are logged at DEBUG, and a summary of the traffic (requests, notifications, frames, CRC errors, skipped bytes) every 30 s. The bridge also listens on the service's other notify characteristics (`0xFF03`, `0xFF04` on the CGO800) and logs what arrives there. Add `logger: logs: cgo: VERBOSE` to log every raw notification.
+#### Encryption
+
+Some displays (seen on the CGO800 Plus) answer plain requests only with an `AT+NAME=…` error and expect an encrypted session first. The bridge tries this handshake on CGO800 bikes and continues unencrypted when the display does not reply to it:
+
+1. The bridge writes 16 random bytes under key `0xD8`; the display replies with its own 16 random bytes under the same key.
+2. Both sides derive a 32-byte AES key with HKDF-SHA256: the bridge's random is the salt, a fixed secret from the Tenways app the input key, and the display's random the info.
+3. The bridge reads key `0xD2`, the 16-byte IV.
+4. From then on every frame is sent and received as an AES-256-CBC packet (PKCS#7 padding, the same IV for every packet):
+
+```
+0xA5 [0x80 | len_hi] [len_lo] [seq_hi] [seq_lo] [ciphertext] [CRC16_hi] [CRC16_lo] 0x5A
+```
+
+`len` is the ciphertext length, `seq` counts packets from 1 and the CRC is CRC-16/MODBUS over `0xA5` up to the ciphertext. Writes to an encrypted display use write with response.
+
+A notification that starts with `AT+` is an error report from the display. Like the Tenways app, the bridge reconnects after the second one.
+
+The first 20 requests and notifications of every King Meter connection are logged at DEBUG, and a summary of the traffic (requests, notifications, frames, CRC errors, skipped bytes, errors) every 30 s. Add `logger: logs: cgo: VERBOSE` to log every raw notification.
 
 ## Repository layout
 

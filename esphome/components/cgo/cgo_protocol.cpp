@@ -208,12 +208,14 @@ const Profile LONGTAIL_PROFILE{"Longtail Duo",
                                sizeof(LONGTAIL_STATUS_KEYS),
                                LONGTAIL_INFO_KEYS,
                                sizeof(LONGTAIL_INFO_KEYS),
+                               false,
                                false};
 const Profile CGO800_PROFILE{"CGO800",
                              CGO800_STATUS_KEYS,
                              sizeof(CGO800_STATUS_KEYS),
                              CGO800_INFO_KEYS,
                              sizeof(CGO800_INFO_KEYS),
+                             true,
                              true};
 
 const Profile &profile_for(const char *device_name) {
@@ -237,10 +239,15 @@ size_t build_read(uint8_t *out, const uint8_t *keys, uint8_t count, bool crc_low
     return finish_frame(out, 4 + count, crc_low_first);
 }
 
-size_t build_write(uint8_t *out, uint8_t key, uint8_t value, bool crc_low_first) {
-    const uint8_t body[] = {TYPE_WRITE, HEADER_BYTE, 4, 1, key, 1, value};
-    memcpy(out, body, sizeof(body));
-    return finish_frame(out, sizeof(body), crc_low_first);
+size_t build_write(uint8_t *out, uint8_t key, const uint8_t *value, uint8_t size, bool crc_low_first) {
+    out[0] = TYPE_WRITE;
+    out[1] = HEADER_BYTE;
+    out[2] = size + 3;
+    out[3] = 1;
+    out[4] = key;
+    out[5] = size;
+    memcpy(out + 6, value, size);
+    return finish_frame(out, 6 + size, crc_low_first);
 }
 
 // The serial number on the CGO800. The Longtail Duo reports another serial

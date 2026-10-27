@@ -7,6 +7,8 @@
 #include <cstring>
 #include <ctime>
 
+#include <esp_random.h>
+
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
 
@@ -17,7 +19,7 @@ static const char *const TAG = "cgo";
 static constexpr uint32_t SUBSCRIBE_SETTLE_MS = 50;
 static constexpr uint32_t HANDSHAKE_STEP_MS = 120;
 static constexpr uint32_t STATIC_REQUEST_INTERVAL_MS = 15000;
-static constexpr size_t MAX_WRITE_LEN = 32;
+static constexpr size_t MAX_WRITE_LEN = 64;
 static constexpr uint32_t LIGHT_CONFIRM_WINDOW_MS = 2000;
 static constexpr uint32_t CCCD_CONFIRM_TIMEOUT_MS = 1000;
 // King Meter support is unconfirmed on most bikes: log the first traffic of
@@ -25,6 +27,10 @@ static constexpr uint32_t CCCD_CONFIRM_TIMEOUT_MS = 1000;
 static constexpr uint32_t KM_DEBUG_LOGGED = 20;
 static constexpr uint32_t KM_SUMMARY_INTERVAL_MS = 30000;
 static constexpr uint8_t KM_SWITCH_AFTER_POLLS = 5;
+static constexpr uint32_t KM_HANDSHAKE_TIMEOUT_MS = 2000;
+// Like the Tenways app, reconnect once the display answers with a second error.
+static constexpr uint32_t KM_AT_REPLIES_BEFORE_RECONNECT = 2;
+static constexpr size_t KM_MAX_FRAME_LEN = 256;
 static constexpr size_t MAX_LOGGED_BYTES = 64;
 // Connection parameters (units: 1.25 ms, 10 ms). Connect with a short interval
 // so service discovery is quick: the bike is often switched off seconds after
@@ -56,8 +62,12 @@ static const espbt::ESPBTUUID NUS_TX_UUID = espbt::ESPBTUUID::from_raw("6e400003
 static const espbt::ESPBTUUID KM_SERVICE_UUID = espbt::ESPBTUUID::from_raw("43480001-f001-4b49-4e47-204d45544552");
 static const espbt::ESPBTUUID KM_WRITE_UUID = espbt::ESPBTUUID::from_raw("43480002-f001-4b49-4e47-204d45544552");
 static const espbt::ESPBTUUID KM_NOTIFY_UUID = espbt::ESPBTUUID::from_raw("43480003-f001-4b49-4e47-204d45544552");
-static const espbt::ESPBTUUID KM_EXTRA_NOTIFY_UUIDS[] = {espbt::ESPBTUUID::from_uint16(0xFF03),
-                                                          espbt::ESPBTUUID::from_uint16(0xFF04)};
+
+// Displays report errors as AT commands to their Bluetooth module, which
+// forwards them as notifications.
+static bool is_at_reply(const uint8_t *data, size_t len) {
+    return len >= 3 && data[0] == 'A' && data[1] == 'T' && data[2] == '+';
+}
 
 static bool contains_ignore_case(const std::string &haystack, const std::string &needle) {
     if (needle.empty() || needle.size() > haystack.size())
@@ -186,8 +196,6 @@ bool CGOComponent::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t
             this->cccd_handle_ = cccd != nullptr ? cccd->handle : 0;
             this->cccd_confirmed_ = this->cccd_handle_ == 0;
             this->cccd_deadline_ = millis() + CCCD_CONFIRM_TIMEOUT_MS;
-            if (this->transport_ == Transport::KING_METER)
-                this->subscribe_extra_km_notify_();
             this->update_ble_status_();
             break;
         }
@@ -215,24 +223,38 @@ bool CGOComponent::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t
             break;
 
         case ESP_GATTC_NOTIFY_EVT: {
+            if (param->notify.handle != this->tx_handle_)
+                break;
             const bool km = this->transport_ == Transport::KING_METER;
             auto &stats = this->km_stats_;
-            if (param->notify.handle != this->tx_handle_) {
-                for (const uint16_t handle : this->extra_notify_handles_) {
-                    if (handle != 0 && handle == param->notify.handle) {
-                        ++stats.extra_notifications;
-                        this->log_bytes_("RX on extra characteristic", handle, param->notify.value,
-                                         param->notify.value_len, stats.extra_notifications <= KM_DEBUG_LOGGED);
-                    }
-                }
-                break;
-            }
+            const uint8_t *data = param->notify.value;
+            size_t len = param->notify.value_len;
             if (km) {
                 ++stats.notifications;
-                stats.notification_bytes += param->notify.value_len;
+                stats.notification_bytes += len;
             }
-            this->log_bytes_("RX", param->notify.handle, param->notify.value, param->notify.value_len,
-                             km && stats.notifications <= KM_DEBUG_LOGGED);
+            this->log_bytes_("RX", param->notify.handle, data, len, km && stats.notifications <= KM_DEBUG_LOGGED);
+            uint8_t plain[KM_MAX_FRAME_LEN];
+            if (km) {
+                if (is_at_reply(data, len)) {
+                    this->handle_km_at_reply_(data, len);
+                    break;
+                }
+                if (this->handle_km_handshake_reply_(data, len))
+                    break;
+                if (this->km_session_.active()) {
+                    len = this->km_session_.unwrap(data, len, plain, sizeof(plain));
+                    if (len == 0) {
+                        ++stats.undecryptable;
+                        ESP_LOGW(TAG, "Could not decrypt a notification (%u this connection)",
+                                 (unsigned) stats.undecryptable);
+                        break;
+                    }
+                    data = plain;
+                    this->log_bytes_("RX decrypted", param->notify.handle, data, len,
+                                     stats.notifications <= KM_DEBUG_LOGGED);
+                }
+            }
             bool saw_trip = false;
             bool changed;
             const uint32_t bad_crc_before = stats.bad_crc;
@@ -240,8 +262,7 @@ bool CGOComponent::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t
             {
                 LockGuard guard(this->state_mutex_);
                 if (km) {
-                    changed = this->km_parser_.feed(this->state_, param->notify.value, param->notify.value_len,
-                                                    saw_trip, stats.bad_crc, stats.unhandled);
+                    changed = this->km_parser_.feed(this->state_, data, len, saw_trip, stats.bad_crc, stats.unhandled);
                 } else {
                     changed = this->parser_.feed(this->state_, param->notify.value, param->notify.value_len,
                                                  saw_trip, this->bad_crc_count_);
@@ -320,25 +341,6 @@ void CGOComponent::on_services_ready_() {
     }
 }
 
-// Subscribes to the other notify characteristics of the King Meter service.
-// Nothing is decoded from them; they are logged in case the bike answers there.
-void CGOComponent::subscribe_extra_km_notify_() {
-    size_t count = 0;
-    for (const auto &uuid : KM_EXTRA_NOTIFY_UUIDS) {
-        auto *chr = this->get_characteristic(KM_SERVICE_UUID, uuid);
-        if (chr == nullptr ||
-            (chr->properties & (ESP_GATT_CHAR_PROP_BIT_NOTIFY | ESP_GATT_CHAR_PROP_BIT_INDICATE)) == 0)
-            continue;
-        if (esp_ble_gattc_register_for_notify(this->gattc_if_, this->remote_bda_, chr->handle) != ESP_OK) {
-            ESP_LOGW(TAG, "register_for_notify failed for handle 0x%04X", chr->handle);
-            continue;
-        }
-        ESP_LOGD(TAG, "Also listening on characteristic 0x%04X (handle 0x%04X)", uuid.get_uuid().uuid.uuid16,
-                 chr->handle);
-        this->extra_notify_handles_[count++] = chr->handle;
-    }
-}
-
 void CGOComponent::log_bytes_(const char *what, uint16_t handle, const uint8_t *data, size_t len, bool debug) {
 #if ESPHOME_LOG_LEVEL < ESPHOME_LOG_LEVEL_VERBOSE
     if (!debug)
@@ -357,12 +359,13 @@ void CGOComponent::log_km_summary_() {
     this->last_km_summary_ = millis();
     const auto &s = this->km_stats_;
     ESP_LOGI(TAG,
-             "King Meter: %u requests, %u notifications (%u bytes), %u frames, %u bad CRC, %u unhandled, "
-             "%u bytes skipped, %u notifications on extra characteristics",
-             (unsigned) s.requests, (unsigned) s.notifications, (unsigned) s.notification_bytes,
-             (unsigned) this->km_parser_.frames(), (unsigned) s.bad_crc, (unsigned) s.unhandled,
-             (unsigned) this->km_parser_.skipped_bytes(), (unsigned) s.extra_notifications);
-    if (s.requests > 0 && s.notifications == 0 && s.extra_notifications == 0)
+             "King Meter (%s): %u requests, %u notifications (%u bytes), %u frames, %u bad CRC, %u unhandled, "
+             "%u bytes skipped, %u errors, %u undecryptable",
+             this->km_session_.active() ? "encrypted" : "unencrypted", (unsigned) s.requests,
+             (unsigned) s.notifications, (unsigned) s.notification_bytes, (unsigned) this->km_parser_.frames(),
+             (unsigned) s.bad_crc, (unsigned) s.unhandled, (unsigned) this->km_parser_.skipped_bytes(),
+             (unsigned) s.at_replies, (unsigned) s.undecryptable);
+    if (s.requests > 0 && s.notifications == 0)
         ESP_LOGW(TAG, "The bike has not sent any notification yet");
 }
 
@@ -420,7 +423,8 @@ void CGOComponent::run_handshake_step_(uint32_t now) {
     };
     static constexpr uint8_t STEP_COUNT = sizeof(STEPS) / sizeof(STEPS[0]);
 
-    // King Meter displays answer read requests without a handshake.
+    if (this->transport_ == Transport::KING_METER && this->run_km_handshake_(now))
+        return;
     if (this->transport_ == Transport::NUS && this->handshake_step_ < STEP_COUNT) {
         if (!this->write_(*STEPS[this->handshake_step_])) {
             ESP_LOGW(TAG, "Handshake step %u failed, disconnecting", this->handshake_step_);
@@ -431,7 +435,98 @@ void CGOComponent::run_handshake_step_(uint32_t now) {
         this->next_step_at_ = now + HANDSHAKE_STEP_MS;
         return;
     }
+    this->finish_handshake_(now);
+}
 
+// Runs the encryption handshake of displays that need it. Returns true while
+// it is still waiting for the display.
+bool CGOComponent::run_km_handshake_(uint32_t now) {
+    if (!this->km_profile_->try_encryption)
+        return false;
+    switch (this->km_handshake_) {
+        case KmHandshake::NONE: {
+            esp_fill_random(this->km_app_random_, sizeof(this->km_app_random_));
+            uint8_t frame[protocol::km::HANDSHAKE_VALUE_LEN + 9];
+            const size_t len =
+                protocol::km::build_write(frame, protocol::km::KEY_HANDSHAKE_RANDOM, this->km_app_random_,
+                                          sizeof(this->km_app_random_), this->km_profile_->crc_low_first);
+            ESP_LOGD(TAG, "Starting the encryption handshake");
+            this->km_write_with_response_ = true;
+            this->km_handshake_ = KmHandshake::WAIT_RANDOM;
+            this->km_handshake_deadline_ = now + KM_HANDSHAKE_TIMEOUT_MS;
+            if (!this->write_km_frame_(frame, len))
+                ESP_LOGW(TAG, "Handshake write failed");
+            return true;
+        }
+        case KmHandshake::WAIT_RANDOM:
+        case KmHandshake::WAIT_IV:
+            if ((int32_t) (now - this->km_handshake_deadline_) < 0)
+                return true;
+            ESP_LOGI(TAG, "No reply to the encryption handshake, continuing unencrypted");
+            this->km_write_with_response_ = false;
+            this->km_handshake_ = KmHandshake::DONE;
+            return false;
+        case KmHandshake::DONE:
+        default:
+            return false;
+    }
+}
+
+// Consumes the display's handshake replies: its random, then the IV.
+bool CGOComponent::handle_km_handshake_reply_(const uint8_t *data, size_t len) {
+    namespace km = protocol::km;
+    if (this->km_handshake_ == KmHandshake::WAIT_RANDOM) {
+        const uint8_t *device_random = km::handshake_value(data, len, km::TYPE_WRITE, km::KEY_HANDSHAKE_RANDOM);
+        if (device_random == nullptr)
+            return false;
+        if (!km::derive_session_key(this->km_app_random_, device_random, this->km_session_key_)) {
+            ESP_LOGW(TAG, "Deriving the session key failed, continuing unencrypted");
+            this->km_write_with_response_ = false;
+            this->km_handshake_ = KmHandshake::DONE;
+            return true;
+        }
+        ESP_LOGD(TAG, "Got the display's random, requesting the IV");
+        static const uint8_t IV_KEYS[] = {km::KEY_HANDSHAKE_IV};
+        this->km_handshake_ = KmHandshake::WAIT_IV;
+        this->km_handshake_deadline_ = millis() + KM_HANDSHAKE_TIMEOUT_MS;
+        if (!this->write_km_read_(IV_KEYS, sizeof(IV_KEYS)))
+            ESP_LOGW(TAG, "IV request failed");
+        return true;
+    }
+    if (this->km_handshake_ == KmHandshake::WAIT_IV) {
+        const uint8_t *iv = km::handshake_value(data, len, km::TYPE_READ, km::KEY_HANDSHAKE_IV);
+        if (iv == nullptr)
+            return false;
+        this->km_session_.start(this->km_session_key_, iv);
+        this->km_handshake_ = KmHandshake::DONE;
+        ESP_LOGI(TAG, "Encrypted session established");
+        return true;
+    }
+    return false;
+}
+
+void CGOComponent::handle_km_at_reply_(const uint8_t *data, size_t len) {
+    // A display that does not expect the handshake can reject it like this.
+    if (this->km_handshake_ == KmHandshake::WAIT_RANDOM) {
+        ESP_LOGI(TAG, "Display rejected the encryption handshake, continuing unencrypted");
+        this->km_write_with_response_ = false;
+        this->km_handshake_ = KmHandshake::DONE;
+        return;
+    }
+    char text[48];
+    size_t n = 0;
+    for (size_t i = 0; i < len && n < sizeof(text) - 1 && data[i] >= 0x20 && data[i] < 0x7F; i++)
+        text[n++] = (char) data[i];
+    text[n] = '\0';
+    const uint32_t count = ++this->km_stats_.at_replies;
+    ESP_LOGW(TAG, "Display reported an error: %s (%u this connection)", text, (unsigned) count);
+    if (count >= KM_AT_REPLIES_BEFORE_RECONNECT) {
+        ESP_LOGW(TAG, "Reconnecting to clear the display error");
+        this->disconnect();
+    }
+}
+
+void CGOComponent::finish_handshake_(uint32_t now) {
     this->request_static_fields_();
     this->phase_ = Phase::POLLING;
     this->last_poll_ = now;
@@ -465,7 +560,8 @@ void CGOComponent::poll_() {
     if (this->transport_ == Transport::KING_METER) {
         // A display ignores requests in the other layout, so a bike whose name
         // did not pick the right one (or that advertises none) gets both tried.
-        if (this->km_parser_.frames() == 0 && ++this->km_unanswered_polls_ > KM_SWITCH_AFTER_POLLS) {
+        if (this->km_parser_.frames() == 0 && !this->km_session_.active() && this->km_stats_.at_replies == 0 &&
+            ++this->km_unanswered_polls_ > KM_SWITCH_AFTER_POLLS) {
             this->km_unanswered_polls_ = 0;
             this->km_profile_ = this->km_profile_ == &protocol::km::CGO800_PROFILE ? &protocol::km::LONGTAIL_PROFILE
                                                                                    : &protocol::km::CGO800_PROFILE;
@@ -484,12 +580,23 @@ bool CGOComponent::write_km_read_(const uint8_t *keys, uint8_t count) {
     uint8_t cmd[MAX_WRITE_LEN];
     if (count + protocol::km::OVERHEAD + 1 > sizeof(cmd))
         return false;
-    return this->write_(cmd, protocol::km::build_read(cmd, keys, count, this->km_profile_->crc_low_first));
+    return this->write_km_frame_(cmd, protocol::km::build_read(cmd, keys, count, this->km_profile_->crc_low_first));
+}
+
+bool CGOComponent::write_km_frame_(const uint8_t *frame, size_t len) {
+    if (!this->km_session_.active())
+        return this->write_(frame, len, this->km_write_with_response_);
+    uint8_t packet[MAX_WRITE_LEN];
+    const size_t packet_len = this->km_session_.wrap(frame, len, packet, sizeof(packet));
+    if (packet_len == 0)
+        return false;
+    this->log_bytes_("TX plain", this->rx_handle_, frame, len, this->km_stats_.requests < KM_DEBUG_LOGGED);
+    return this->write_(packet, packet_len, true);
 }
 
 bool CGOComponent::write_(const protocol::Command &cmd) { return this->write_(cmd.data, cmd.len); }
 
-bool CGOComponent::write_(const uint8_t *data, size_t len) {
+bool CGOComponent::write_(const uint8_t *data, size_t len, bool with_response) {
     if (this->rx_handle_ == 0 || !this->connected() || len > MAX_WRITE_LEN)
         return false;
 
@@ -497,10 +604,12 @@ bool CGOComponent::write_(const uint8_t *data, size_t len) {
     uint8_t buf[MAX_WRITE_LEN];
     memcpy(buf, data, len);
 
-    // Write without response like the Tenways app; fall back to with-response.
+    // Write without response like the Tenways app unless asked otherwise; fall
+    // back to with-response.
     esp_err_t err = esp_ble_gattc_write_char(this->gattc_if_, this->conn_id_, this->rx_handle_, len, buf,
-                                             ESP_GATT_WRITE_TYPE_NO_RSP, ESP_GATT_AUTH_REQ_NONE);
-    if (err != ESP_OK) {
+                                             with_response ? ESP_GATT_WRITE_TYPE_RSP : ESP_GATT_WRITE_TYPE_NO_RSP,
+                                             ESP_GATT_AUTH_REQ_NONE);
+    if (err != ESP_OK && !with_response) {
         err = esp_ble_gattc_write_char(this->gattc_if_, this->conn_id_, this->rx_handle_, len, buf,
                                        ESP_GATT_WRITE_TYPE_RSP, ESP_GATT_AUTH_REQ_NONE);
     }
@@ -519,8 +628,8 @@ bool CGOComponent::set_light(bool on) {
     bool ok;
     if (this->transport_ == Transport::KING_METER) {
         uint8_t cmd[10];
-        ok = this->write_(cmd, protocol::km::build_write(cmd, protocol::km::KEY_LIGHT, on ? 1 : 0,
-                                                         this->km_profile_->crc_low_first));
+        ok = this->write_km_frame_(cmd, protocol::km::build_write(cmd, protocol::km::KEY_LIGHT, on ? 1 : 0,
+                                                                  this->km_profile_->crc_low_first));
     } else {
         ok = this->write_(on ? protocol::LIGHT_ON_CMD : protocol::LIGHT_OFF_CMD);
     }
@@ -583,8 +692,11 @@ void CGOComponent::reset_session_() {
     this->cccd_handle_ = 0;
     this->cccd_confirmed_ = false;
     this->km_stats_ = {};
-    for (auto &handle : this->extra_notify_handles_)
-        handle = 0;
+    this->km_handshake_ = KmHandshake::NONE;
+    this->km_write_with_response_ = false;
+    this->km_session_.reset();
+    memset(this->km_app_random_, 0, sizeof(this->km_app_random_));
+    memset(this->km_session_key_, 0, sizeof(this->km_session_key_));
     this->parser_.reset();
     this->km_parser_.reset();
 }
