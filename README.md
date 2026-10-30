@@ -17,7 +17,6 @@ entities. Rides and distance per day, week or month are derived in Home Assistan
 | Tenways CGO600 Pro, PLUS, Pro-C, Pro_T | Experimental |
 | Tenways CGO800S, CGO800 Plus | Experimental: connects, data unconfirmed |
 | Tenways CGO009, Longtail Duo, AGO AIR, Wayfarer_B, CGO600_D, AGO, AGOX, AGOT, CARGO, CGO COMPACT_D, CGO001 | Experimental |
-| Tenways DM, Bosch Smart System | Not supported |
 
 Experimental displays get the requests their official app uses but have not been confirmed on a real
 bike. Logs are welcome in [issue #2](https://github.com/stein155/ebike-bridge/issues/2). The

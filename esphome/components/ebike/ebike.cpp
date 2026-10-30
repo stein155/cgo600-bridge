@@ -43,7 +43,7 @@ static constexpr size_t MAX_FRAME_LEN = 256;
 // A CGO600 that sends no data this long after polling started gets the
 // encryption handshake (variants) or the requests of older app versions.
 static constexpr uint32_t NUS_FALLBACK_AFTER_MS = 5000;
-static constexpr size_t MAX_LOGGED_BYTES = 64;
+static constexpr size_t MAX_LOGGED_BYTES = 128;  // fits a full status frame
 // The BIKEGO plus app gives the display 10 s to answer the authentication.
 static constexpr uint32_t B06_AUTH_TIMEOUT_MS = 10000;
 // Bump when protocol::BikeState changes layout; older data is then ignored.
