@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>CGO600 Bridge Installer</title>
-    <meta name="description" content="Install the CGO600 Bridge firmware on an ESP32 straight from your browser.">
+    <title>E-bike Bridge Installer</title>
+    <meta name="description" content="Install the E-bike Bridge firmware on an ESP32 straight from your browser.">
     <meta name="theme-color" content="#070b16">
     <script type="module" src="https://unpkg.com/esp-web-tools@10.4.0/dist/web/install-button.js?module"></script>
     <style>
@@ -83,29 +83,27 @@
 </head>
 <body>
 <main>
-    <h1>CGO600 Bridge Installer</h1>
+    <h1>E-bike Bridge Installer</h1>
     <p class="lead">
-        Turn an ESP32 into a bridge that reads your Tenways CGO600 over Bluetooth and brings
-        battery, range, trips and the light into Home Assistant. No tools to install, just your browser.
+        Turn an ESP32 into a bridge that reads your e-bike display over Bluetooth and brings battery,
+        speed, trips, odometer and the light into Home Assistant. No tools to install, just your browser.
     </p>
 
     <ul class="requirements">
         <li>An ESP32 board; the ESP32-WROOM-32U with an external antenna gives the best range</li>
         <li>A USB data cable (not a charge-only cable)</li>
         <li>Chrome or Edge on a desktop computer (Web Serial)</li>
-        <li>Upgrading from the old standalone firmware? Export your rides first via <em>http://&lt;bridge&gt;/api/rides</em>, then use <em>Import rides</em> in the new dashboard.</li>
     </ul>
 
     <section class="card">
         <h2>What you get</h2>
         <ul>
-            <li>A dashboard on the bridge itself: live battery, range and light, plus your ride history</li>
-            <li>Battery, range, trips, light and more in Home Assistant, discovered automatically</li>
-            <li>Rides inferred from departure and arrival, also sent to Home Assistant as events</li>
+            <li>Battery, speed, trips, odometer and the light in Home Assistant, discovered automatically</li>
+            <li>Tenways bikes (CGO600, CGO800 and the King Meter models) and B06 displays</li>
             <li>Built on ESPHome: updates over WiFi, and adopt it in the ESPHome add-on to customise</li>
         </ul>
         <esp-web-install-button manifest="manifest.json">
-            <button class="install" slot="activate">Install CGO600 Bridge</button>
+            <button class="install" slot="activate">Install E-bike Bridge</button>
             <span slot="unsupported" class="notice">Your browser does not support Web Serial. Use Chrome or Edge on a desktop computer.</span>
             <span slot="not-allowed" class="notice">Web Serial needs a secure (https) connection.</span>
         </esp-web-install-button>
@@ -113,18 +111,17 @@
 
     <h3>After installing</h3>
     <ol>
-        <li>Enter your WiFi details when the installer asks for them. If you skip this step, connect to the <em>CGO600 Bridge</em> hotspot instead.</li>
-        <li>Click <em>Visit device</em> to open the bridge dashboard, and bookmark it. The address is also shown under <em>Settings → System</em>.</li>
+        <li>Enter your WiFi details when the installer asks for them. If you skip this step, connect to the <em>E-bike Bridge</em> hotspot instead.</li>
         <li>Add the bridge in Home Assistant under <em>Settings → Devices &amp; services</em>; it is usually discovered automatically.</li>
         <li>Switch the bike on near the bridge. It connects automatically; no pairing or MAC address is needed.</li>
     </ol>
 
-    <p class="notice">A new install erases the ESP32. Later updates are installed over WiFi, and the ride history is kept.</p>
+    <p class="notice">A new install erases the ESP32. Later updates are installed over WiFi.</p>
 
     <footer>
         <p>
-            Unofficial community project, not affiliated with or endorsed by Tenways.
-            Source code and documentation on <a href="https://github.com/stein155/cgo600-bridge">GitHub</a>.
+            Unofficial community project, not affiliated with or endorsed by any bike or display maker.
+            Source code and documentation on <a href="https://github.com/stein155/ebike-bridge">GitHub</a>.
         </p>
     </footer>
 </main>

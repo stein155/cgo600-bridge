@@ -38,7 +38,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install ESPHome
-        run: pip install esphome==2026.6.5
+        run: pip install esphome==2026.10.0
 
       - name: Create placeholder secrets
         run: |
@@ -49,8 +49,8 @@ jobs:
           api_encryption_key: "$(openssl rand -base64 32)"
           EOF
 
-      - name: Compile example configuration
-        run: esphome compile esphome/cgo600.yaml
+      - name: Compile development configuration
+        run: esphome compile esphome/dev.yaml
 
       - name: Compile web installer configuration
         run: |

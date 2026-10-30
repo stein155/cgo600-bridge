@@ -1,21 +1,12 @@
 # Support
 
-This is a community firmware project with best-effort support.
+Community project with best-effort support. Before opening an issue:
 
-Before opening an issue:
-
-- Install the latest release from the [web installer](https://stein155.github.io/cgo600-bridge/) or update over WiFi.
-- Restart the ESP32 and the bike display.
+- Update to the latest release from the [web installer](https://stein155.github.io/ebike-bridge/) or over WiFi.
+- Restart the ESP32 and the bike display, and close the bike's own app: a display accepts one connection.
 - Check the logs (`esphome logs`, the ESPHome dashboard, or USB serial at `115200` baud).
-- Confirm your bike advertises a BLE name containing `CGO600` or `CGO800` (or set `device_names` to its name).
-- If the `.local` address does not open, use the bridge's IP address from your router or Home Assistant.
+- Check that the bike's Bluetooth name matches `device_names`; the defaults are in
+  `esphome/components/ebike/__init__.py`.
 
-Useful information for bug reports:
-
-- Firmware release or commit SHA, and the ESPHome version
-- ESP32 board type
-- How it was installed (web installer, ESPHome dashboard, own configuration)
-- Home Assistant version
-- Screenshot of the dashboard
-- Logs from boot through the failure
-- Whether the issue started after a configuration or firmware change
+Include in a bug report: firmware release or commit, ESPHome and Home Assistant versions, ESP32 board,
+display model, how it was installed, and logs from boot through the failure.

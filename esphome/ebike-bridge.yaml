@@ -1,0 +1,98 @@
+# Firmware flashed by the web installer: one bike, found by name.
+#
+# WiFi is set up from the browser (Improv serial) or the "E-bike Bridge"
+# hotspot. Home Assistant then discovers the bridge, and the ESPHome dashboard
+# offers to adopt it (dashboard_import) for further customisation.
+
+substitutions:
+  name: ebike-bridge
+  friendly_name: E-bike Bridge
+  # Set by the release workflow (esphome -s project_version X.Y.Z compile ...)
+  project_version: dev
+
+esphome:
+  name: ${name}
+  friendly_name: ${friendly_name}
+  # Several bridges on one network each get a unique hostname.
+  name_add_mac_suffix: true
+  project:
+    name: stein155.ebike-bridge
+    version: ${project_version}
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+logger:
+
+api:
+
+ota:
+  - platform: esphome
+
+wifi:
+  ap:
+    ssid: E-bike Bridge
+
+captive_portal:
+
+improv_serial:
+
+dashboard_import:
+  package_import_url: github://stein155/ebike-bridge/esphome/ebike-bridge.yaml@main
+  import_full_config: true
+
+external_components:
+  - source:
+      type: git
+      url: https://github.com/stein155/ebike-bridge
+      ref: main
+      path: esphome/components
+    components: [ebike]
+
+esp32_ble_tracker:
+  scan_parameters:
+    # Bikes are often in range only briefly on departure and arrival, so scan
+    # with a high duty cycle while leaving airtime for WiFi.
+    active: true
+    continuous: true
+    interval: 320ms
+    window: 160ms
+
+ebike:
+
+sensor:
+  - platform: ebike
+    battery:
+      name: Battery
+    speed:
+      name: Speed
+    max_speed:
+      name: Max speed
+    avg_speed:
+      name: Average speed
+    trip_distance:
+      name: Trip distance
+    trip_duration:
+      name: Trip duration
+    remaining_range:
+      name: Remaining range
+    odometer:
+      name: Odometer
+    power:
+      name: Power
+
+text_sensor:
+  - platform: ebike
+    serial_number:
+      name: Serial number
+    firmware_version:
+      name: Firmware version
+    ble_status:
+      name: BLE status
+
+switch:
+  - platform: ebike
+    light:
+      name: Light

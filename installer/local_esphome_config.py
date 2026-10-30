@@ -1,4 +1,4 @@
-"""Write a copy of esphome/cgo600-install.yaml that uses the local component.
+"""Write a copy of esphome/ebike-bridge.yaml that uses the local component.
 
 The install configuration pulls the component from the main branch on GitHub,
 which is what adopted devices should track. CI and release builds must compile
@@ -12,7 +12,7 @@ Usage:
 import os
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SRC = os.path.join(ROOT, "esphome", "cgo600-install.yaml")
+SRC = os.path.join(ROOT, "esphome", "ebike-bridge.yaml")
 OUT = os.path.join(ROOT, "esphome", ".install-ci.yaml")
 
 LOCAL_SOURCE = ["  - source:", "      type: local", "      path: components"]
