@@ -1,0 +1,71 @@
+# One bike as its own device in Home Assistant. Include it once per bike:
+#
+#   packages:
+#     bike_1: !include
+#       file: bike.yaml
+#       vars:
+#         id: bike_1            # unique per bike; also keys its state in flash
+#         name: Bike 1          # device name in Home Assistant
+#         device_name: CGO600   # part of the bike's Bluetooth name
+#
+# Each bike takes one BLE connection; ESP-IDF allows three by default.
+
+esphome:
+  devices:
+    - id: ${id}_device
+      name: ${name}
+
+ebike:
+  - id: ${id}
+    device_names: ["${device_name}"]
+
+sensor:
+  - platform: ebike
+    ebike_id: ${id}
+    battery:
+      name: Battery
+      device_id: ${id}_device
+    speed:
+      name: Speed
+      device_id: ${id}_device
+    max_speed:
+      name: Max speed
+      device_id: ${id}_device
+    avg_speed:
+      name: Average speed
+      device_id: ${id}_device
+    trip_distance:
+      name: Trip distance
+      device_id: ${id}_device
+    trip_duration:
+      name: Trip duration
+      device_id: ${id}_device
+    remaining_range:
+      name: Remaining range
+      device_id: ${id}_device
+    odometer:
+      name: Odometer
+      device_id: ${id}_device
+    power:
+      name: Power
+      device_id: ${id}_device
+
+text_sensor:
+  - platform: ebike
+    ebike_id: ${id}
+    serial_number:
+      name: Serial number
+      device_id: ${id}_device
+    firmware_version:
+      name: Firmware version
+      device_id: ${id}_device
+    ble_status:
+      name: BLE status
+      device_id: ${id}_device
+
+switch:
+  - platform: ebike
+    ebike_id: ${id}
+    light:
+      name: Light
+      device_id: ${id}_device

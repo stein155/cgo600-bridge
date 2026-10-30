@@ -1,68 +1,41 @@
 # Contributing
 
-Thanks for your interest in improving the CGO600 Bridge. This is a small,
-independent hobby project — contributions are welcome.
+Contributions are welcome. This is a small, independent hobby project.
 
-## Project layout
+## Layout
 
-- `esphome/components/cgo/` — the ESPHome external component (C++ and Python)
-- `esphome/components/cgo/web/` — dashboard sources, bundled and embedded
-  into the firmware on every compile
-- `esphome/cgo600-install.yaml` — the configuration the web installer flashes
-- `installer/` — the web installer page and the scripts that publish it
-- `AGENTS.md` — detailed conventions and important paths
+- `esphome/components/ebike/`: the ESPHome component (C++ and Python)
+- `esphome/ebike-bridge.yaml`: the configuration the web installer flashes
+- `esphome/bike.yaml`, `esphome/dev.yaml`: per-bike package and development configuration
+- `homeassistant/blueprints/`: Home Assistant blueprints
+- `installer/`: the web installer page and the scripts that publish it
+- `docs/protocols.md`: protocol reference
 
-## Building & flashing
+## Build and test
 
-Install [ESPHome](https://esphome.io/guides/installing_esphome) (the CI uses
-the version pinned in `.github/workflows/esphome.yml`), then:
-
-```bash
-cp esphome/secrets.yaml.example esphome/secrets.yaml   # fill in WiFi and keys
-esphome compile esphome/cgo600.yaml
-esphome run esphome/cgo600.yaml                         # flash over USB or WiFi
-esphome logs esphome/cgo600.yaml                        # live logs over WiFi
-```
-
-To build the configuration the web installer ships, with the local component:
+Install [ESPHome](https://esphome.io/guides/installing_esphome) at the version pinned in
+`.github/workflows/esphome.yml`, then:
 
 ```bash
-python3 installer/local_esphome_config.py
-esphome compile esphome/.install-ci.yaml
+tests/run.sh                                            # host tests, needs mbedtls
+cp esphome/secrets.yaml.example esphome/secrets.yaml    # fill in WiFi and keys
+esphome run esphome/dev.yaml                            # compile and flash over USB or WiFi
+esphome logs esphome/dev.yaml                           # live logs over WiFi
+python3 installer/local_esphome_config.py && esphome compile esphome/.install-ci.yaml
 ```
 
-## Code style
-
-- C++ follows ESPHome conventions (`snake_case` methods, trailing-underscore
-  protected members, `this->`) with 4-space indentation; see `.clang-format`.
-- Keep entity keys stable: `battery`, `speed`, `max_speed`, `avg_speed`,
-  `trip_distance`, `trip_duration`, `remaining_range`, `range`,
-  `serial_number`, `ble_status`, `light`. They are part of the Home Assistant contract.
-- Log with ESPHome's `ESP_LOG*` macros and the component's tags (`cgo`,
-  `cgo.rides`, `cgo.web`).
-
-## Testing
-
-`tests/run.sh` builds and runs the host tests of the protocol code: request frames,
-reply parsing and the session encryption, checked against frames from the Tenways app
-and captures. It needs a C++17 compiler and mbedtls (`libmbedtls-dev`, or
-`brew install mbedtls@3` on macOS).
-
-Everything else is validated manually:
-
-1. `esphome compile` must succeed for `esphome/cgo600.yaml` and the install configuration.
-2. Flash to hardware and verify the logs, the BLE connection, the Home Assistant
-   entities and the dashboard.
-
-CI runs the host tests and compiles both configurations.
+Only the protocol code has automated tests. Verify everything else on hardware: the logs, the BLE
+connection and the Home Assistant entities. CI runs the host tests and compiles both configurations.
 
 ## Pull requests
 
-- Keep changes scoped and explain the *why* in the description.
-- Note any manual verification you performed (build output, on-device behavior).
-- For protocol changes, confirm field IDs and entity keys stay stable.
+- Keep changes scoped and explain the *why*.
+- Note the manual verification you did and on which display.
+- Keep field IDs and entity keys (`battery`, `speed`, `max_speed`, `avg_speed`, `trip_distance`,
+  `trip_duration`, `remaining_range`, `odometer`, `power`, `serial_number`, `firmware_version`,
+  `ble_status`, `light`) stable; they are the Home Assistant contract.
 
-## Reporting issues
+## Issues
 
-Please use the bug report template and include the firmware version, board and
-logs. See `SUPPORT.md` for troubleshooting first.
+Use the bug report template and include the firmware version, board, display and logs. See `SUPPORT.md`
+first.

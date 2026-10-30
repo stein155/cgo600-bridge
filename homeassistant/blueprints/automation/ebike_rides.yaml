@@ -1,0 +1,168 @@
+blueprint:
+  name: E-bike rides
+  description: >-
+    Logs the rides of one bike from its odometer, which never resets: a ride is
+    counted even when the bridge missed the arrival, and rides between two
+    sightings of the bike count as one. Every ride becomes an event in a calendar,
+    which keeps it permanently, and fires the `ebike_ride` event. A text helper
+    holds the bike's state between rides (create one with a maximum length of 255).
+    Run the automation once after creating it, so the first ride is counted.
+  domain: automation
+  source_url: https://github.com/stein155/ebike-bridge/blob/main/homeassistant/blueprints/automation/ebike_rides.yaml
+  input:
+    bike:
+      name: Bike name
+      description: Used in the calendar event's title.
+      selector:
+        text:
+    odometer:
+      name: Odometer
+      selector:
+        entity:
+          domain: sensor
+          device_class: distance
+    ride_time:
+      name: Trip duration
+      description: Gives the ride's duration and average speed.
+      selector:
+        entity:
+          domain: sensor
+          device_class: duration
+    battery:
+      name: Battery
+      selector:
+        entity:
+          domain: sensor
+          device_class: battery
+    calendar:
+      name: Calendar
+      description: A local calendar works well.
+      selector:
+        entity:
+          domain: calendar
+    baseline:
+      name: State helper
+      description: A text helper (maximum length 255) used by this automation only.
+      selector:
+        entity:
+          domain: input_text
+    last_ride:
+      name: Last ride helper
+      description: Optional text helper (maximum length 255) that shows the last ride.
+      default: ""
+      selector:
+        entity:
+          domain: input_text
+    min_distance:
+      name: Minimum distance
+      description: Smaller odometer increases are not counted as a ride.
+      default: 0.2
+      selector:
+        number:
+          min: 0
+          max: 10
+          step: 0.1
+          unit_of_measurement: km
+
+mode: queued
+
+triggers:
+  - trigger: state
+    entity_id: !input odometer
+  # The bridge publishes battery and trip duration before the odometer, so the
+  # baseline only takes values that stayed put; a ride's new values arrive just
+  # before its odometer change and are counted with it.
+  - trigger: state
+    entity_id:
+      - !input battery
+      - !input ride_time
+    for: "00:00:30"
+  # Takes the first baseline without waiting for the odometer to change; run
+  # the automation once after creating it to do the same.
+  - trigger: homeassistant
+    event: start
+
+variables:
+  bike: !input bike
+  baseline_entity: !input baseline
+  last_ride_entity: !input last_ride
+  min_distance: !input min_distance
+  odometer_entity: !input odometer
+  ride_time_entity: !input ride_time
+  battery_entity: !input battery
+  odometer: "{{ states(odometer_entity) | float(none) }}"
+  ride_time: "{{ states(ride_time_entity) | float(none) }}"
+  battery: "{{ states(battery_entity) | int(none) }}"
+  stamp: "{{ now().isoformat() }}"
+  reading: "{{ {'odometer': odometer, 'ride_time': ride_time, 'battery': battery, 'seen': stamp} | to_json }}"
+  base: >-
+    {% set raw = states(baseline_entity) %}
+    {% set base = raw | from_json if raw.startswith('{') else none %}
+    {{ base if base and base.odometer is number else none }}
+  ride: >-
+    {% if odometer is not none and base and odometer - base.odometer >= min_distance %}
+      {% set distance = odometer - base.odometer %}
+      {% set end = as_datetime(stamp) %}
+      {% set duration = (ride_time - base.ride_time) | int
+           if ride_time is not none and base.ride_time is not none and ride_time > base.ride_time else none %}
+      {% set start = end - timedelta(seconds=duration) if duration else as_datetime(base.seen) %}
+      {{ {
+        'start': start.isoformat(),
+        'end': end.isoformat(),
+        'distance_km': distance | round(1),
+        'duration_s': duration,
+        'avg_speed_kmh': (distance / duration * 3600) | round(1) if duration else none,
+        'battery_start': base.battery,
+        'battery_end': battery,
+      } }}
+    {% else %}
+      {{ none }}
+    {% endif %}
+  summary: >-
+    {% if ride %}
+      {{ ride.distance_km }} km
+      {%- if ride.duration_s %} in {{ (ride.duration_s / 60) | round | int }} min at {{ ride.avg_speed_kmh }} km/h{% endif %}
+      {%- if ride.battery_start is not none and ride.battery_end is not none %}, battery {{ ride.battery_start }}% → {{ ride.battery_end }}%{% endif %}
+    {% endif %}
+
+conditions:
+  - condition: template
+    value_template: "{{ odometer is not none }}"
+
+actions:
+  - choose:
+      - alias: Ride
+        conditions: "{{ ride is mapping }}"
+        sequence:
+          - action: calendar.create_event
+            target:
+              entity_id: !input calendar
+            data:
+              summary: "{{ bike }}: {{ ride.distance_km }} km"
+              start_date_time: "{{ ride.start }}"
+              end_date_time: "{{ ride.end }}"
+              description: "{{ summary }}"
+          - event: ebike_ride
+            event_data:
+              bike: "{{ bike }}"
+              ride: "{{ ride }}"
+          - if: "{{ last_ride_entity != '' }}"
+            then:
+              - action: input_text.set_value
+                target:
+                  entity_id: "{{ last_ride_entity }}"
+                data:
+                  value: "{{ as_timestamp(ride.end) | timestamp_custom('%-d %b %H:%M') }}: {{ summary }}"
+          - action: input_text.set_value
+            target:
+              entity_id: !input baseline
+            data:
+              value: "{{ reading }}"
+      - alias: Parked, or the odometer went back
+        conditions: "{{ not base or odometer <= base.odometer }}"
+        sequence:
+          - action: input_text.set_value
+            target:
+              entity_id: !input baseline
+            data:
+              value: "{{ reading }}"

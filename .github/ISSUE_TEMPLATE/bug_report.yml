@@ -1,5 +1,5 @@
 name: Bug report
-description: Report a firmware, installation, BLE, Home Assistant, or dashboard issue
+description: Report a firmware, installation, BLE or Home Assistant issue
 title: "[Bug]: "
 labels: [bug]
 body:
@@ -18,6 +18,13 @@ body:
       placeholder: ESP32 DevKitV1, WROOM-32, etc.
     validations:
       required: true
+  - type: input
+    id: display
+    attributes:
+      label: Bike and display
+      placeholder: Tenways CGO600, B06 display, ...
+    validations:
+      required: true
   - type: dropdown
     id: area
     attributes:
@@ -26,7 +33,7 @@ body:
         - Installation / first setup
         - BLE connection
         - Home Assistant
-        - Web dashboard / ride history
+        - Rides / blueprint
         - Update
         - Other
     validations:

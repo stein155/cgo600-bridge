@@ -26,7 +26,7 @@ jobs:
           python-version: '3.12'
 
       - name: Install ESPHome
-        run: pip install esphome==2026.6.5
+        run: pip install esphome==2026.10.0
 
       - name: Determine version
         id: version
@@ -50,11 +50,11 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          BUILD=esphome/.esphome/build/cgo600-bridge/.pioenvs/cgo600-bridge
-          cp "$BUILD/firmware.factory.bin" cgo600-bridge-factory.bin
-          cp "$BUILD/firmware.ota.bin" cgo600-bridge-ota.bin
-          sha256sum cgo600-bridge-*.bin > SHA256SUMS
-          gh release upload "${{ github.event.release.tag_name }}" cgo600-bridge-*.bin SHA256SUMS --clobber
+          BUILD=esphome/.esphome/build/ebike-bridge/.pioenvs/ebike-bridge
+          cp "$BUILD/firmware.factory.bin" ebike-bridge-factory.bin
+          cp "$BUILD/firmware.ota.bin" ebike-bridge-ota.bin
+          sha256sum ebike-bridge-*.bin > SHA256SUMS
+          gh release upload "${{ github.event.release.tag_name }}" ebike-bridge-*.bin SHA256SUMS --clobber
 
       - uses: actions/upload-pages-artifact@v3
         with:

@@ -5,8 +5,8 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-src=esphome/components/cgo
-out="${TMPDIR:-/tmp}/cgo-protocol-test"
+src=esphome/components/ebike
+out="${TMPDIR:-/tmp}/ebike-protocol-test"
 
 if [ -z "${MBEDTLS_PREFIX:-}" ] && [ -d /opt/homebrew/opt/mbedtls@3 ]; then
     MBEDTLS_PREFIX=/opt/homebrew/opt/mbedtls@3
@@ -17,6 +17,6 @@ if [ -n "${MBEDTLS_PREFIX:-}" ]; then
 fi
 
 c++ -std=c++17 -Wall -Wextra -Werror -I"$src" "${flags[@]}" \
-    tests/protocol_test.cpp "$src/cgo_protocol.cpp" "$src/cgo_crypto.cpp" \
+    tests/protocol_test.cpp "$src/protocol.cpp" "$src/crypto.cpp" \
     -lmbedcrypto -o "$out"
 "$out"

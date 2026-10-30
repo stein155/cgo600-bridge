@@ -1,0 +1,52 @@
+# Development configuration: the component from this checkout, two bikes and
+# credentials from secrets.yaml (copy secrets.yaml.example).
+
+esphome:
+  name: ebike-bridge-dev
+  friendly_name: E-bike Bridge Dev
+
+esp32:
+  board: esp32dev
+  framework:
+    type: esp-idf
+
+logger:
+
+api:
+  encryption:
+    key: !secret api_encryption_key
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+
+external_components:
+  - source:
+      type: local
+      path: components
+    components: [ebike]
+
+esp32_ble_tracker:
+  scan_parameters:
+    active: true
+    continuous: true
+    interval: 320ms
+    window: 160ms
+
+packages:
+  bike_1: !include
+    file: bike.yaml
+    vars:
+      id: bike_1
+      name: Bike 1
+      device_name: CGO600
+  bike_2: !include
+    file: bike.yaml
+    vars:
+      id: bike_2
+      name: Bike 2
+      device_name: B06
