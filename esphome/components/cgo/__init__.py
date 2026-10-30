@@ -44,6 +44,8 @@ DEFAULT_DEVICE_NAMES = [
     "AGOT",
     "CARGO",
     "Wayfarer",
+    # B06 displays (BIKEGO plus app) advertise as B06_BLE.
+    "B06",
 ]
 
 cgo_ns = cg.esphome_ns.namespace("cgo")

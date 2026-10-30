@@ -35,6 +35,8 @@ static constexpr size_t MAX_FRAME_LEN = 256;
 // encryption handshake.
 static constexpr uint32_t NUS_ENCRYPTION_AFTER_MS = 5000;
 static constexpr size_t MAX_LOGGED_BYTES = 64;
+// The BIKEGO plus app gives the display 10 s to answer the authentication.
+static constexpr uint32_t B06_AUTH_TIMEOUT_MS = 10000;
 // Connection parameters (units: 1.25 ms, 10 ms). Connect with a short interval
 // so service discovery is quick: the bike is often switched off seconds after
 // arriving, and a 50 ms interval stretched discovery to over 10 s. Once the
@@ -65,6 +67,10 @@ static const espbt::ESPBTUUID NUS_TX_UUID = espbt::ESPBTUUID::from_raw("6e400003
 static const espbt::ESPBTUUID KM_SERVICE_UUID = espbt::ESPBTUUID::from_raw("43480001-f001-4b49-4e47-204d45544552");
 static const espbt::ESPBTUUID KM_WRITE_UUID = espbt::ESPBTUUID::from_raw("43480002-f001-4b49-4e47-204d45544552");
 static const espbt::ESPBTUUID KM_NOTIFY_UUID = espbt::ESPBTUUID::from_raw("43480003-f001-4b49-4e47-204d45544552");
+// Microchip transparent UART, used by B06 displays.
+static const espbt::ESPBTUUID B06_SERVICE_UUID = espbt::ESPBTUUID::from_raw("49535343-fe7d-4ae5-8fa9-9fafd205e455");
+static const espbt::ESPBTUUID B06_NOTIFY_UUID = espbt::ESPBTUUID::from_raw("49535343-1e4d-4bd9-ba61-23c647249616");
+static const espbt::ESPBTUUID B06_WRITE_UUID = espbt::ESPBTUUID::from_raw("49535343-8841-43f4-a8d4-ecbe34729bb3");
 
 // Displays report errors as AT commands to their Bluetooth module, which
 // forwards them as notifications.
@@ -132,7 +138,7 @@ bool CGOComponent::matches_(const espbt::ESPBTDevice &device) const {
     }
     // The bike sometimes omits its name; its service still identifies it.
     for (const auto &uuid : device.get_service_uuids()) {
-        if (uuid == NUS_SERVICE_UUID || uuid == KM_SERVICE_UUID)
+        if (uuid == NUS_SERVICE_UUID || uuid == KM_SERVICE_UUID || uuid == B06_SERVICE_UUID)
             return true;
     }
     return false;
@@ -231,14 +237,16 @@ bool CGOComponent::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t
             if (param->notify.handle != this->tx_handle_)
                 break;
             const bool km = this->transport_ == Transport::KING_METER;
+            const bool b06 = this->transport_ == Transport::B06;
             auto &stats = this->link_stats_;
             const uint8_t *data = param->notify.value;
             size_t len = param->notify.value_len;
-            if (km) {
+            if (km || b06) {
                 ++stats.notifications;
                 stats.notification_bytes += len;
             }
-            this->log_bytes_("RX", param->notify.handle, data, len, km && stats.notifications <= DEBUG_LOGGED);
+            this->log_bytes_("RX", param->notify.handle, data, len,
+                             (km || b06) && stats.notifications <= DEBUG_LOGGED);
             uint8_t plain[MAX_FRAME_LEN];
             if (is_at_reply(data, len)) {
                 this->handle_at_reply_(data, len);
@@ -266,6 +274,8 @@ bool CGOComponent::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t
                 LockGuard guard(this->state_mutex_);
                 if (km) {
                     changed = this->km_parser_.feed(this->state_, data, len, saw_trip, stats.bad_crc, stats.unhandled);
+                } else if (b06) {
+                    changed = this->b06_parser_.feed(this->state_, data, len, saw_trip, stats.bad_crc, stats.unhandled);
                 } else {
                     changed = this->parser_.feed(this->state_, data, len, saw_trip, this->bad_crc_count_);
                     if (this->state_.power_w >= 0 && !this->power_seen_) {
@@ -274,6 +284,8 @@ bool CGOComponent::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t
                     }
                 }
             }
+            if (b06)
+                this->handle_b06_auth_();
             if (stats.bad_crc != bad_crc_before)
                 ESP_LOGD(TAG, "Frame failed the CRC check (%u this connection)", (unsigned) stats.bad_crc);
             if (stats.unhandled != unhandled_before)
@@ -327,6 +339,15 @@ void CGOComponent::on_services_ready_() {
                                         (name_len >= 2 && this->bike_name_.compare(name_len - 2, 2, "_D") == 0);
         tx = this->get_characteristic(KM_SERVICE_UUID, KM_NOTIFY_UUID);
         rx = this->get_characteristic(KM_SERVICE_UUID, KM_WRITE_UUID);
+    } else if (this->get_service(B06_SERVICE_UUID) != nullptr) {
+        this->transport_ = Transport::B06;
+        // The B06 reports none of these; drop values restored from another bike.
+        LockGuard guard(this->state_mutex_);
+        this->state_.remaining_range_km = -1;
+        this->state_.power_w = -1;
+        this->state_.serial_number[0] = '\0';
+        tx = this->get_characteristic(B06_SERVICE_UUID, B06_NOTIFY_UUID);
+        rx = this->get_characteristic(B06_SERVICE_UUID, B06_WRITE_UUID);
     }
     if (tx == nullptr || rx == nullptr) {
         ESP_LOGE(TAG, "No supported bike service found (tx=%s rx=%s)", YESNO(tx != nullptr), YESNO(rx != nullptr));
@@ -336,6 +357,8 @@ void CGOComponent::on_services_ready_() {
     }
     if (this->transport_ == Transport::KING_METER) {
         ESP_LOGI(TAG, "Using the King Meter protocol (%s layout)", this->km_profile_->name);
+    } else if (this->transport_ == Transport::B06) {
+        ESP_LOGI(TAG, "Using the B06 protocol");
     } else {
         ESP_LOGI(TAG, "Using the Nordic UART protocol (CGO600)");
     }
@@ -368,6 +391,12 @@ void CGOComponent::log_bytes_(const char *what, uint16_t handle, const uint8_t *
 void CGOComponent::log_km_summary_() {
     this->last_km_summary_ = millis();
     const auto &s = this->link_stats_;
+    if (this->transport_ == Transport::B06) {
+        ESP_LOGI(TAG, "B06: %u requests, %u notifications (%u bytes), %u frames, %u bad CRC, %u unhandled",
+                 (unsigned) s.requests, (unsigned) s.notifications, (unsigned) s.notification_bytes,
+                 (unsigned) this->b06_parser_.frames(), (unsigned) s.bad_crc, (unsigned) s.unhandled);
+        return;
+    }
     ESP_LOGI(TAG,
              "King Meter (%s): %u requests, %u notifications (%u bytes), %u frames, %u bad CRC, %u unhandled, "
              "%u bytes skipped, %u errors, %u undecryptable",
@@ -399,7 +428,7 @@ void CGOComponent::loop() {
     if (this->phase_ == Phase::HANDSHAKE) {
         this->run_handshake_step_(now);
     } else if (this->phase_ == Phase::POLLING) {
-        if (this->transport_ == Transport::KING_METER && now - this->last_km_summary_ >= KM_SUMMARY_INTERVAL_MS)
+        if (this->transport_ != Transport::NUS && now - this->last_km_summary_ >= KM_SUMMARY_INTERVAL_MS)
             this->log_km_summary_();
         if (this->is_nus_variant_() && this->enc_handshake_ == EncHandshake::NONE &&
             this->connect_started_ms_ != 0 && now - this->polling_started_ms_ >= NUS_ENCRYPTION_AFTER_MS) {
@@ -426,6 +455,10 @@ void CGOComponent::run_handshake_step_(uint32_t now) {
             return;
         ESP_LOGW(TAG, "Bike did not confirm the notification subscription, continuing");
         this->cccd_confirmed_ = true;
+    }
+    if (this->transport_ == Transport::B06) {
+        this->run_b06_handshake_(now);
+        return;
     }
     if ((int32_t) (now - this->next_step_at_) < 0)
         return;
@@ -456,6 +489,53 @@ void CGOComponent::run_handshake_step_(uint32_t now) {
         return;
     }
     this->finish_handshake_(now);
+}
+
+// Starts the authentication and finishes the handshake once the display has
+// answered it; the challenge itself is answered from handle_b06_auth_().
+void CGOComponent::run_b06_handshake_(uint32_t now) {
+    namespace b06 = protocol::b06;
+    if (this->handshake_step_ == 0) {
+        if ((int32_t) (now - this->next_step_at_) < 0)
+            return;
+        static const uint8_t START[] = {0x01};
+        uint8_t frame[sizeof(START) + b06::OVERHEAD];
+        if (!this->send_frame_(frame, b06::build_frame(frame, b06::CMD_AUTH_START, START, sizeof(START)))) {
+            ESP_LOGW(TAG, "Authentication request failed, disconnecting");
+            this->disconnect();
+            return;
+        }
+        this->handshake_step_ = 1;
+        this->next_step_at_ = now + B06_AUTH_TIMEOUT_MS;
+        return;
+    }
+    const auto result = this->b06_parser_.auth_result();
+    if (result == b06::FrameParser::AuthResult::NONE && (int32_t) (now - this->next_step_at_) < 0)
+        return;
+    if (result == b06::FrameParser::AuthResult::OK) {
+        ESP_LOGI(TAG, "Display accepted the authentication");
+    } else if (result == b06::FrameParser::AuthResult::FAILED) {
+        ESP_LOGW(TAG, "Display rejected the authentication, listening anyway");
+    } else {
+        ESP_LOGW(TAG, "No answer to the authentication, listening anyway");
+    }
+    this->finish_handshake_(now);
+}
+
+void CGOComponent::handle_b06_auth_() {
+    uint8_t challenge[protocol::b06::AUTH_CHALLENGE_LEN];
+    if (!this->b06_parser_.take_challenge(challenge))
+        return;
+    uint8_t answer[16];
+    uint8_t frame[sizeof(answer) + protocol::b06::OVERHEAD];
+    if (!protocol::b06_auth_answer(challenge, answer)) {
+        ESP_LOGW(TAG, "Computing the authentication answer failed");
+        return;
+    }
+    ESP_LOGD(TAG, "Answering the authentication challenge");
+    if (!this->send_frame_(frame, protocol::b06::build_frame(frame, protocol::b06::CMD_AUTH_ANSWER, answer,
+                                                             sizeof(answer))))
+        ESP_LOGW(TAG, "Authentication answer failed");
 }
 
 // The CGO600 family members other than the CGO600 itself, which the Tenways
@@ -590,6 +670,14 @@ void CGOComponent::request_static_fields_() {
     bool ok;
     if (this->transport_ == Transport::KING_METER) {
         ok = this->write_km_read_(this->km_profile_->info_keys, this->km_profile_->info_count);
+    } else if (this->transport_ == Transport::B06) {
+        {
+            LockGuard guard(this->state_mutex_);
+            if (this->state_.firmware[0] != '\0')
+                return;
+        }
+        uint8_t frame[protocol::b06::OVERHEAD];
+        ok = this->send_frame_(frame, protocol::b06::build_frame(frame, protocol::b06::CMD_VERSION, nullptr, 0));
     } else {
         // Separate requests, so a bike that does not know one of the fields
         // still answers the others. Not every CGO600 reports its power; ask
@@ -606,6 +694,9 @@ void CGOComponent::request_static_fields_() {
 }
 
 void CGOComponent::poll_() {
+    // B06 displays push their data without being asked.
+    if (this->transport_ == Transport::B06)
+        return;
     bool ok;
     if (this->transport_ == Transport::KING_METER) {
         // A silent display may expect the encryption handshake, or requests in
@@ -690,7 +781,7 @@ bool CGOComponent::write_(const uint8_t *data, size_t len, bool with_response) {
         err = esp_ble_gattc_write_char(this->gattc_if_, this->conn_id_, this->rx_handle_, len, buf,
                                        ESP_GATT_WRITE_TYPE_RSP, ESP_GATT_AUTH_REQ_NONE);
     }
-    if (err == ESP_OK && this->transport_ == Transport::KING_METER) {
+    if (err == ESP_OK && this->transport_ != Transport::NUS) {
         ++this->link_stats_.requests;
         this->log_bytes_("TX", this->rx_handle_, data, len, this->link_stats_.requests <= DEBUG_LOGGED);
     }
@@ -703,7 +794,10 @@ bool CGOComponent::set_light(bool on) {
         return false;
     }
     bool ok;
-    if (this->transport_ == Transport::KING_METER) {
+    if (this->transport_ == Transport::B06) {
+        uint8_t cmd[4 + protocol::b06::OVERHEAD];
+        ok = this->send_frame_(cmd, protocol::b06::build_light(cmd, on));
+    } else if (this->transport_ == Transport::KING_METER) {
         uint8_t cmd[10];
         ok = this->send_frame_(cmd, protocol::km::build_write(cmd, protocol::km::KEY_LIGHT, on ? 1 : 0,
                                                               this->km_profile_->crc_low_first));
@@ -745,7 +839,7 @@ void CGOComponent::resume_scanning_() {
 
 void CGOComponent::reset_session_() {
     this->resume_scanning_();
-    if (this->transport_ == Transport::KING_METER && this->phase_ != Phase::IDLE)
+    if (this->transport_ != Transport::NUS && this->transport_ != Transport::NONE && this->phase_ != Phase::IDLE)
         this->log_km_summary_();
     if (this->phase_ == Phase::POLLING) {
         // Keep the last readings, but a speed from before the bike left is no
@@ -781,6 +875,7 @@ void CGOComponent::reset_session_() {
     memset(this->enc_session_key_, 0, sizeof(this->enc_session_key_));
     this->parser_.reset();
     this->km_parser_.reset();
+    this->b06_parser_.reset();
 }
 
 void CGOComponent::restore_last_state_() {

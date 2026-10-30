@@ -22,6 +22,10 @@ static constexpr size_t PACKET_OVERHEAD = 8;  // 0xA5, len, seq, crc, 0x5A
 // key and the display's random as info.
 bool derive_session_key(const uint8_t app_random[16], const uint8_t device_random[16], uint8_t key[32]);
 
+// The B06 display's challenge-response: AES-128-ECB with a key fixed in the
+// BIKEGO plus app over the 4-byte challenge padded with zeros to one block.
+bool b06_auth_answer(const uint8_t challenge[4], uint8_t answer[16]);
+
 // Returns the 16-byte value of a handshake reply
 // ([type] 0x00 [len] 0x01 [key] 0x10 [value...]), or nullptr for other frames.
 const uint8_t *km_handshake_value(const uint8_t *data, size_t len, uint8_t type, uint8_t key);

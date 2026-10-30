@@ -26,7 +26,8 @@ namespace espbt = esphome::esp32_ble_tracker;
 // address: it connects to the first advertiser whose name contains one of
 // device_names or that advertises a known bike service. The CGO600 speaks its
 // protocol over the Nordic UART service; newer displays such as the CGO800's
-// use the King Meter service instead.
+// use the King Meter service instead, and B06 displays (BIKEGO plus app) the
+// Microchip transparent UART service.
 class CGOComponent : public esp32_ble_client::BLEClientBase {
  public:
     void setup() override;
@@ -79,7 +80,7 @@ class CGOComponent : public esp32_ble_client::BLEClientBase {
 
  protected:
     enum class Phase : uint8_t { IDLE, HANDSHAKE, POLLING };
-    enum class Transport : uint8_t { NONE, NUS, KING_METER };
+    enum class Transport : uint8_t { NONE, NUS, KING_METER, B06 };
 
     bool matches_(const espbt::ESPBTDevice &device) const;
     void on_services_ready_();
@@ -87,6 +88,8 @@ class CGOComponent : public esp32_ble_client::BLEClientBase {
     void log_bytes_(const char *what, uint16_t handle, const uint8_t *data, size_t len, bool debug);
     void log_km_summary_();
     void run_handshake_step_(uint32_t now);
+    void run_b06_handshake_(uint32_t now);
+    void handle_b06_auth_();
     bool write_(const protocol::Command &cmd);
     bool write_(const uint8_t *data, size_t len, bool with_response = false);
     bool send_frame_(const uint8_t *frame, size_t len);
@@ -180,6 +183,7 @@ class CGOComponent : public esp32_ble_client::BLEClientBase {
     uint32_t last_state_saved_ms_{0};
     protocol::FrameParser parser_;
     protocol::km::FrameParser km_parser_;
+    protocol::b06::FrameParser b06_parser_;
     const char *last_ble_status_{nullptr};
 
     sensor::Sensor *battery_sensor_{nullptr};

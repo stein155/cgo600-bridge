@@ -62,6 +62,26 @@ bool derive_session_key(const uint8_t app_random[16], const uint8_t device_rando
     return hmac_sha256(prk, sizeof(prk), device_random, HANDSHAKE_VALUE_LEN, &COUNTER, 1, key);
 }
 
+// KEY_AUTH_SECRET of the BIKEGO plus app 1.6.1.
+static const uint8_t B06_AUTH_KEY[16] = {0x94, 0x93, 0x4B, 0xB3, 0x01, 0xB0, 0xE4, 0x0F,
+                                         0x2E, 0xC0, 0x5B, 0x04, 0x58, 0x8B, 0xAD, 0xD4};
+
+bool b06_auth_answer(const uint8_t challenge[4], uint8_t answer[16]) {
+    const mbedtls_cipher_info_t *info = mbedtls_cipher_info_from_type(MBEDTLS_CIPHER_AES_128_ECB);
+    if (info == nullptr)
+        return false;
+    uint8_t block[BLOCK] = {0};
+    memcpy(block, challenge, 4);
+    mbedtls_cipher_context_t ctx;
+    mbedtls_cipher_init(&ctx);
+    size_t out_len = 0;
+    const bool ok = mbedtls_cipher_setup(&ctx, info) == 0 &&
+                    mbedtls_cipher_setkey(&ctx, B06_AUTH_KEY, 128, MBEDTLS_ENCRYPT) == 0 &&
+                    mbedtls_cipher_update(&ctx, block, BLOCK, answer, &out_len) == 0 && out_len == BLOCK;
+    mbedtls_cipher_free(&ctx);
+    return ok;
+}
+
 const uint8_t *km_handshake_value(const uint8_t *data, size_t len, uint8_t type, uint8_t key) {
     if (len < 6 + HANDSHAKE_VALUE_LEN || data[0] != type || data[4] != key || data[5] != HANDSHAKE_VALUE_LEN)
         return nullptr;

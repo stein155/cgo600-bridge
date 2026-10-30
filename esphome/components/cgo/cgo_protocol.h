@@ -176,4 +176,70 @@ class FrameParser {
 
 }  // namespace km
 
+// B06 displays (BIKEGO plus app) over the Microchip transparent UART service.
+// Frames in both directions:
+//   0xA5 [len] [cmd] [payload...] [crc_lo] [crc_hi] 0x0D
+// len counts the payload and the checksum is CRC-16/XMODEM over len..payload.
+// The display needs an AES challenge-response (see cgo_crypto.h) and then
+// pushes its ride and battery frames on its own; it is never polled.
+namespace b06 {
+
+static constexpr uint8_t FRAME_START = 0xA5;
+static constexpr uint8_t FRAME_END = 0x0D;
+static constexpr size_t OVERHEAD = 6;  // start, len, cmd, crc, crc, end
+
+static constexpr uint8_t CMD_AUTH_START = 0x20;
+static constexpr uint8_t CMD_AUTH_ANSWER = 0x21;
+static constexpr uint8_t CMD_VERSION = 0x40;
+static constexpr uint8_t CMD_RIDE = 0x41;
+static constexpr uint8_t CMD_BATTERY = 0x42;
+static constexpr uint8_t CMD_CONFIG = 0x43;
+static constexpr size_t AUTH_CHALLENGE_LEN = 4;
+
+uint16_t crc16(const uint8_t *data, size_t len);
+
+// Builds a frame; out must hold len + OVERHEAD bytes.
+size_t build_frame(uint8_t *out, uint8_t cmd, const uint8_t *payload, uint8_t len);
+// Builds the configuration write that switches the light; out must hold
+// 4 + OVERHEAD bytes.
+size_t build_light(uint8_t *out, bool on);
+
+// Reassembles notification chunks into frames, decodes the ride, battery and
+// version frames into the shared BikeState and keeps the authentication
+// replies for the component.
+class FrameParser {
+ public:
+    static constexpr size_t BUFFER_SIZE = 2 * (0xFF + OVERHEAD);
+
+    void reset() {
+        this->len_ = 0;
+        this->frames_ = 0;
+        this->challenge_ready_ = false;
+        this->auth_result_ = AuthResult::NONE;
+    }
+    // Same contract as km::FrameParser::feed.
+    bool feed(BikeState &state, const uint8_t *data, size_t len, bool &saw_trip, uint32_t &bad_crc,
+              uint32_t &unhandled);
+
+    // The display's challenge, once per received challenge frame.
+    bool take_challenge(uint8_t out[AUTH_CHALLENGE_LEN]);
+    enum class AuthResult : uint8_t { NONE, OK, FAILED };
+    AuthResult auth_result() const { return this->auth_result_; }
+    uint32_t frames() const { return this->frames_; }
+
+ private:
+    // Returns false for frames we do not know; sets changed when state was updated.
+    bool handle_frame_(BikeState &state, uint8_t cmd, const uint8_t *payload, uint8_t len, bool &saw_trip,
+                       bool &changed);
+
+    uint8_t buffer_[BUFFER_SIZE]{};
+    size_t len_{0};
+    uint32_t frames_{0};
+    uint8_t challenge_[AUTH_CHALLENGE_LEN]{};
+    bool challenge_ready_{false};
+    AuthResult auth_result_{AuthResult::NONE};
+};
+
+}  // namespace b06
+
 }  // namespace esphome::cgo::protocol
