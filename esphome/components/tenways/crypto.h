@@ -34,7 +34,7 @@ class Session {
     void start(const uint8_t key[32], const uint8_t iv[16]);
     void reset();
     bool active() const { return this->active_; }
-    // Encrypts one King Meter frame into a packet. Returns the packet length,
+    // Encrypts one frame into a packet. Returns the packet length,
     // or 0 when out is too small or no session is active.
     size_t wrap(const uint8_t *frame, size_t len, uint8_t *out, size_t out_size);
     // Checks and decrypts one packet. Returns the frame length, or 0 when the

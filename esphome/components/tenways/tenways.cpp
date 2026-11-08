@@ -20,7 +20,7 @@ static constexpr uint32_t STATIC_REQUEST_INTERVAL_MS = 15000;
 // Serial number, firmware and power are asked for at most this often per
 // connection; a display that does not know one of them never answers.
 static constexpr uint8_t STATIC_REQUEST_ATTEMPTS = 4;
-// One frame in flight at a time, like the Tenways app's write queue.
+// Writes are spaced like the Tenways app's write queue.
 static constexpr uint32_t TX_SPACING_MS = 150;
 // Reconnect when a connected display goes quiet; before its first frame it gets
 // time to try the encryption handshake and the other request layouts.
@@ -44,7 +44,6 @@ static constexpr size_t MAX_LOGGED_BYTES = 128;  // fits a full status frame
 // Bump when protocol::BikeState changes layout; older data is then ignored.
 static constexpr uint32_t LAST_STATE_MAGIC = 0x43475303;
 static constexpr uint32_t LAST_STATE_SAVE_INTERVAL_MS = 5 * 60 * 1000;
-
 
 static const espbt::ESPBTUUID NUS_SERVICE_UUID = espbt::ESPBTUUID::from_raw("6e400001-b5a3-f393-e0a9-e50e24dcca9e");
 static const espbt::ESPBTUUID NUS_RX_UUID = espbt::ESPBTUUID::from_raw("6e400002-b5a3-f393-e0a9-e50e24dcca9e");
@@ -84,7 +83,6 @@ void TenwaysComponent::setup() {
     this->restore_last_state_();
     this->update_ble_status_();
 }
-
 
 void TenwaysComponent::dump_config() {
     ESP_LOGCONFIG(TAG, "Tenways bike:");
@@ -132,7 +130,8 @@ bool TenwaysComponent::claimed_by_other_(uint64_t address) const {
 }
 
 bool TenwaysComponent::parse_device(const espbt::ESPBTDevice &device) {
-    if (this->state() != espbt::ClientState::IDLE || !this->matches_(device) ||
+    // Before the GATT client is registered, connect() would only be rejected.
+    if (this->gattc_if_ == ESP_GATT_IF_NONE || this->state() != espbt::ClientState::IDLE || !this->matches_(device) ||
         this->claimed_by_other_(device.address_uint64()))
         return false;
 
@@ -155,6 +154,7 @@ void TenwaysComponent::set_state(espbt::ClientState state) {
 
 void TenwaysComponent::connect() {
     this->connect_started_ms_ = millis();
+    this->got_data_ = false;
     // Leave the connection parameters to the stack, like the bikes' own apps:
     // forcing short intervals or updating them during setup cost connections.
     // Scanning alongside the setup does too.
@@ -172,7 +172,7 @@ void TenwaysComponent::gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_g
 }
 
 bool TenwaysComponent::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if,
-                                          esp_ble_gattc_cb_param_t *param) {
+                                           esp_ble_gattc_cb_param_t *param) {
     if (!BLEClientBase::gattc_event_handler(event, gattc_if, param))
         return false;
 
@@ -192,7 +192,6 @@ bool TenwaysComponent::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_
             ESP_LOGD(TAG, "Subscribed, starting handshake");
             bike_scan_v1::pause_unless_needed(this);
             this->phase_ = Phase::HANDSHAKE;
-            this->handshake_step_ = 0;
             this->next_step_at_ = millis() + SUBSCRIBE_SETTLE_MS;
             // The base class enables notifications by writing this descriptor.
             auto *cccd = this->get_config_descriptor(this->tx_handle_);
@@ -233,12 +232,9 @@ bool TenwaysComponent::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_
             auto &stats = this->link_stats_;
             const uint8_t *data = param->notify.value;
             size_t len = param->notify.value_len;
-            if (km) {
-                ++stats.notifications;
-                stats.notification_bytes += len;
-            }
-            this->log_bytes_("RX", param->notify.handle, data, len,
-                             km && stats.notifications <= DEBUG_LOGGED);
+            ++stats.notifications;
+            stats.notification_bytes += len;
+            this->log_bytes_("RX", param->notify.handle, data, len, km && stats.notifications <= DEBUG_LOGGED);
             uint8_t plain[MAX_FRAME_LEN];
             if (is_at_reply(data, len)) {
                 this->handle_at_reply_(data, len);
@@ -255,8 +251,7 @@ bool TenwaysComponent::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_
                     break;
                 }
                 data = plain;
-                this->log_bytes_("RX decrypted", param->notify.handle, data, len,
-                                 stats.notifications <= DEBUG_LOGGED);
+                this->log_bytes_("RX decrypted", param->notify.handle, data, len, stats.notifications <= DEBUG_LOGGED);
             }
             bool changed;
             const uint32_t bad_crc_before = stats.bad_crc;
@@ -264,7 +259,7 @@ bool TenwaysComponent::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_
             if (km) {
                 changed = this->km_parser_.feed(this->state_, data, len, stats.bad_crc, stats.unhandled);
             } else {
-                changed = this->parser_.feed(this->state_, data, len, this->bad_crc_count_);
+                changed = this->parser_.feed(this->state_, data, len, stats.bad_crc);
                 if (this->state_.power_w >= 0 && !this->power_seen_) {
                     this->power_seen_ = true;
                     ESP_LOGD(TAG, "Bike reports its power, polling it");
@@ -273,12 +268,12 @@ bool TenwaysComponent::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_
             if (stats.bad_crc != bad_crc_before)
                 ESP_LOGD(TAG, "Frame failed the CRC check (%u this connection)", (unsigned) stats.bad_crc);
             if (stats.unhandled != unhandled_before)
-                ESP_LOGD(TAG, "Received a frame without known fields (%u this connection)",
-                         (unsigned) stats.unhandled);
+                ESP_LOGD(TAG, "Received a frame without known fields (%u this connection)", (unsigned) stats.unhandled);
             if (changed) {
-                if (this->connect_started_ms_ != 0) {
-                    ESP_LOGI(TAG, "First data %u ms after connecting", (unsigned) (millis() - this->connect_started_ms_));
-                    this->connect_started_ms_ = 0;
+                if (!this->got_data_) {
+                    ESP_LOGI(TAG, "First data %u ms after connecting",
+                             (unsigned) (millis() - this->connect_started_ms_));
+                    this->got_data_ = true;
                 }
                 this->last_state_dirty_ = true;
                 this->publish_state_();
@@ -303,15 +298,16 @@ void TenwaysComponent::on_services_ready_() {
     esp32_ble_client::BLECharacteristic *rx = nullptr;
     if (this->get_service(NUS_SERVICE_UUID) != nullptr) {
         this->transport_ = Transport::NUS;
+        // A power value stored from an earlier session must not count as the
+        // bike answering this session's power read.
+        this->state_.power_w = -1;
         tx = this->get_characteristic(NUS_SERVICE_UUID, NUS_TX_UUID);
         rx = this->get_characteristic(NUS_SERVICE_UUID, NUS_RX_UUID);
     } else if (this->get_service(KM_SERVICE_UUID) != nullptr) {
         this->transport_ = Transport::KING_METER;
         this->km_profile_ = &protocol::km::profile_for(this->bike_name_.c_str());
         this->km_parser_.set_profile(this->km_profile_);
-        const size_t name_len = this->bike_name_.size();
-        this->km_write_with_response_ = this->km_profile_->write_with_response ||
-                                        (name_len >= 2 && this->bike_name_.compare(name_len - 2, 2, "_D") == 0);
+        this->km_write_with_response_ = this->km_profile_->write_with_response || this->name_wants_response_();
         tx = this->get_characteristic(KM_SERVICE_UUID, KM_NOTIFY_UUID);
         rx = this->get_characteristic(KM_SERVICE_UUID, KM_WRITE_UUID);
     }
@@ -329,7 +325,7 @@ void TenwaysComponent::on_services_ready_() {
     this->tx_handle_ = tx->handle;
     this->rx_handle_ = rx->handle;
 
-    const esp_err_t err = esp_ble_gattc_register_for_notify(this->gattc_if_, this->remote_bda_, this->tx_handle_);
+    const esp_err_t err = this->register_for_notify(this->tx_handle_);
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "register_for_notify failed: %d", err);
         this->disconnect();
@@ -382,13 +378,16 @@ void TenwaysComponent::loop() {
 
     const uint32_t now = millis();
     this->flush_tx_(now);
+    // Until the close event resets the session, a disconnect is in progress.
+    if (!this->connected())
+        return;
     if (this->phase_ == Phase::HANDSHAKE) {
-        this->run_handshake_step_(now);
+        this->run_handshake_(now);
     } else if (this->phase_ == Phase::POLLING) {
         if (this->transport_ != Transport::NUS && now - this->last_km_summary_ >= KM_SUMMARY_INTERVAL_MS)
             this->log_km_summary_();
-        const bool no_data_yet = this->connect_started_ms_ != 0;
-        if (this->transport_ == Transport::NUS && no_data_yet && now - this->polling_started_ms_ >= NUS_FALLBACK_AFTER_MS) {
+        if (this->transport_ == Transport::NUS && !this->got_data_ &&
+            now - this->polling_started_ms_ >= NUS_FALLBACK_AFTER_MS) {
             if (this->is_nus_variant_() && this->enc_handshake_ == EncHandshake::NONE) {
                 ESP_LOGI(TAG, "No data from the bike yet, trying the encryption handshake");
                 this->start_encryption_(now);
@@ -399,18 +398,21 @@ void TenwaysComponent::loop() {
                 this->write_(protocol::BOOTSTRAP_CMD_3);
             }
         }
-        const uint32_t quiet_since = std::max(this->polling_started_ms_, this->last_rx_ms_);
-        if (now - quiet_since >= (no_data_yet ? FIRST_DATA_TIMEOUT_MS : DATA_TIMEOUT_MS)) {
-            ESP_LOGW(TAG, "No data from the bike for %u s, reconnecting", (unsigned) ((now - quiet_since) / 1000));
+        const uint32_t quiet_ms = now - this->last_rx_ms_;
+        if (quiet_ms >= (this->got_data_ ? DATA_TIMEOUT_MS : FIRST_DATA_TIMEOUT_MS)) {
+            ESP_LOGW(TAG, "No data from the bike for %u s, reconnecting", (unsigned) (quiet_ms / 1000));
             this->disconnect();
             return;
         }
-        if (!this->encryption_pending_(now) && now - this->last_poll_ >= this->poll_interval_ms_) {
+        if (this->last_state_dirty_ && now - this->last_state_saved_ms_ >= LAST_STATE_SAVE_INTERVAL_MS)
+            this->save_last_state_();
+        // Frames queued during the encryption handshake would go out in plain text.
+        if (this->encryption_pending_(now))
+            return;
+        if (now - this->last_poll_ >= this->poll_interval_ms_) {
             this->last_poll_ = now;
             this->poll_();
         }
-        if (this->last_state_dirty_ && now - this->last_state_saved_ms_ >= LAST_STATE_SAVE_INTERVAL_MS)
-            this->save_last_state_();
         if (this->static_requests_ < STATIC_REQUEST_ATTEMPTS && this->static_fields_missing_() &&
             now - this->last_static_request_ >= STATIC_REQUEST_INTERVAL_MS)
             this->request_static_fields_();
@@ -418,7 +420,7 @@ void TenwaysComponent::loop() {
 }
 
 // Runs from loop() until the display is ready to be polled.
-void TenwaysComponent::run_handshake_step_(uint32_t now) {
+void TenwaysComponent::run_handshake_(uint32_t now) {
     if (!this->cccd_confirmed_) {
         if ((int32_t) (now - this->cccd_deadline_) < 0)
             return;
@@ -436,6 +438,12 @@ void TenwaysComponent::run_handshake_step_(uint32_t now) {
     if (this->encryption_pending_(now))
         return;
     this->finish_handshake_(now);
+}
+
+// The app writes with response to every model whose name ends in _D.
+bool TenwaysComponent::name_wants_response_() const {
+    const size_t len = this->bike_name_.size();
+    return len >= 2 && this->bike_name_.compare(len - 2, 2, "_D") == 0;
 }
 
 // The CGO600 family members other than the CGO600 itself, which the Tenways
@@ -497,8 +505,8 @@ bool TenwaysComponent::handle_enc_handshake_reply_(const uint8_t *data, size_t l
         static const uint8_t IV_KEYS[] = {protocol::KEY_HANDSHAKE_IV};
         this->enc_handshake_ = EncHandshake::WAIT_IV;
         this->enc_deadline_ = millis() + HANDSHAKE_TIMEOUT_MS;
-        const bool ok = nus ? this->write_nus_read_(IV_KEYS, sizeof(IV_KEYS))
-                            : this->write_km_read_(IV_KEYS, sizeof(IV_KEYS));
+        const bool ok =
+            nus ? this->write_nus_read_(IV_KEYS, sizeof(IV_KEYS)) : this->write_km_read_(IV_KEYS, sizeof(IV_KEYS));
         if (!ok)
             ESP_LOGW(TAG, "IV request failed");
         return true;
@@ -550,11 +558,7 @@ void TenwaysComponent::finish_handshake_(uint32_t now) {
     this->last_poll_ = now;
     this->last_km_summary_ = now;
     this->polling_started_ms_ = now;
-    if (this->transport_ == Transport::NUS) {
-        // A power value stored from an earlier session must not count as the
-        // bike answering this session's power read.
-        this->state_.power_w = -1;
-    }
+    this->last_rx_ms_ = now;
     ESP_LOGI(TAG, "Handshake complete, polling every %u ms", (unsigned) this->poll_interval_ms_);
     this->update_ble_status_();
 }
@@ -602,6 +606,7 @@ void TenwaysComponent::poll_() {
             }
             this->km_profile_ = &protocol::km::alternative_to(*this->km_profile_);
             this->km_parser_.set_profile(this->km_profile_);
+            this->km_write_with_response_ = this->km_profile_->write_with_response || this->name_wants_response_();
             ESP_LOGI(TAG, "No reply from the bike, trying the %s layout", this->km_profile_->name);
             this->request_static_fields_();
         }
@@ -612,8 +617,8 @@ void TenwaysComponent::poll_() {
         } else {
             // The status read of the Tenways app 2.18.0, which the CGO600 PLUS
             // gets with its power; so does any CGO600 that reported power.
-            static const uint8_t STATUS[] = {0x07, 0x11, 0x12, 0x13, 0x14, 0x15, 0x16,
-                                             0x17, 0x21, 0x1A, 0x2D, protocol::FIELD_POWER};
+            static const uint8_t STATUS[] = {0x07, 0x11, 0x12, 0x13, 0x14, 0x15,
+                                             0x16, 0x17, 0x21, 0x1A, 0x2D, protocol::FIELD_POWER};
             const bool with_power = this->power_seen_ || this->bike_name_.rfind("CGO600 PLUS", 0) == 0;
             ok = this->write_nus_read_(STATUS, with_power ? sizeof(STATUS) : sizeof(STATUS) - 1);
         }
@@ -647,7 +652,9 @@ bool TenwaysComponent::send_frame_(const uint8_t *frame, size_t len) {
     return this->write_(packet, packet_len, this->enc_write_with_response_ || this->km_write_with_response_);
 }
 
-bool TenwaysComponent::write_(const protocol::Command &cmd) { return this->write_(cmd.data, cmd.len); }
+bool TenwaysComponent::write_(const protocol::Command &cmd) {
+    return this->write_(cmd.data, cmd.len);
+}
 
 // Queues a frame; flush_tx_() sends it. Returns false when the bike is not
 // connected or the queue is full.
@@ -689,15 +696,15 @@ void TenwaysComponent::flush_tx_(uint32_t now) {
 }
 
 bool TenwaysComponent::set_light(bool on) {
-    if (this->phase_ != Phase::POLLING) {
+    if (this->phase_ != Phase::POLLING || this->encryption_pending_(millis())) {
         ESP_LOGW(TAG, "Light command ignored: bike not connected");
         return false;
     }
     bool ok;
     if (this->transport_ == Transport::KING_METER) {
         uint8_t cmd[10];
-        ok = this->send_frame_(cmd, protocol::km::build_write(cmd, protocol::km::KEY_LIGHT, on ? 1 : 0,
-                                                              this->km_profile_->crc_low_first));
+        ok = this->send_frame_(
+            cmd, protocol::km::build_write(cmd, protocol::km::KEY_LIGHT, on ? 1 : 0, this->km_profile_->crc_low_first));
     } else {
         const auto &cmd = on ? protocol::LIGHT_ON_CMD : protocol::LIGHT_OFF_CMD;
         ok = this->send_frame_(cmd.data, cmd.len);
@@ -707,6 +714,7 @@ bool TenwaysComponent::set_light(bool on) {
         return false;
     }
     ESP_LOGD(TAG, "Light %s", on ? "on" : "off");
+    this->light_pending_ = true;
     this->light_pending_on_ = on;
     this->light_pending_until_ = millis() + LIGHT_CONFIRM_WINDOW_MS;
     // Poll right away so the bike's confirmation arrives quickly.
@@ -739,7 +747,8 @@ void TenwaysComponent::reset_session_() {
     this->static_requests_ = 0;
     this->tx_count_ = 0;
     this->last_rx_ms_ = 0;
-    this->handshake_step_ = 0;
+    this->got_data_ = false;
+    this->light_pending_ = false;
     this->tx_handle_ = 0;
     this->rx_handle_ = 0;
     this->cccd_handle_ = 0;
@@ -808,13 +817,12 @@ void TenwaysComponent::publish_state_() {
         this->firmware_version_text_sensor_->publish_state(s.firmware);
     }
     if (this->light_switch_ != nullptr && s.light_valid) {
-        const bool pending = (int32_t) (millis() - this->light_pending_until_) < 0;
+        if (this->light_pending_ &&
+            (s.light_on == this->light_pending_on_ || (int32_t) (millis() - this->light_pending_until_) >= 0))
+            this->light_pending_ = false;
         // Skip stale reports sent before the bike applied the last command.
-        if (!pending || s.light_on == this->light_pending_on_) {
-            this->light_pending_until_ = millis();
-            if (this->light_switch_->state != s.light_on)
-                this->light_switch_->publish_state(s.light_on);
-        }
+        if (!this->light_pending_ && this->light_switch_->state != s.light_on)
+            this->light_switch_->publish_state(s.light_on);
     }
 }
 

@@ -8,6 +8,7 @@ blueprint:
     holds the bike's state between rides (create one with a maximum length of 255).
     Run the automation once after creating it, so the first ride is counted.
   domain: automation
+  # yamllint disable-line rule:line-length
   source_url: https://github.com/stein155/tenways-bridge/blob/main/homeassistant/blueprints/automation/tenways_rides.yaml
   input:
     bike:
@@ -118,12 +119,15 @@ variables:
     {% else %}
       {{ none }}
     {% endif %}
+  # One template line per part: splitting a line changes the folded text.
+  # yamllint disable rule:line-length
   summary: >-
     {% if ride %}
       {{ ride.distance_km }} km
       {%- if ride.duration_s %} in {{ (ride.duration_s / 60) | round | int }} min at {{ ride.avg_speed_kmh }} km/h{% endif %}
       {%- if ride.battery_start is not none and ride.battery_end is not none %}, battery {{ ride.battery_start }}% → {{ ride.battery_end }}%{% endif %}
     {% endif %}
+  # yamllint enable rule:line-length
 
 conditions:
   - condition: template

@@ -36,6 +36,7 @@ Preferred commands from repo root:
 
 ```bash
 tests/run.sh
+./lint.sh                 # clang-format, ruff, yamllint, shellcheck; --fix applies the fixes
 esphome compile esphome/dev.yaml
 esphome upload esphome/dev.yaml --device <bridge-ip>
 esphome logs esphome/dev.yaml --device <bridge-ip>
@@ -72,7 +73,8 @@ python3 installer/local_esphome_config.py && esphome compile esphome/.install-ci
 ## Workflow Notes
 - At minimum ensure both configurations compile.
 - For protocol changes, keep field IDs and entity keys stable.
-- Be explicit that only the protocol code has automated tests and there are no lint gates.
+- Be explicit that only the protocol code has automated tests. `./lint.sh` is the lint gate CI runs; install the
+  pinned linters with `pip install -r requirements-lint.txt`.
 - This setup may be used for live debugging; prefer adding observability that can be read remotely when safe.
 - The user allows live firmware builds and uploads for diagnostics and fixes when needed.
 - Live logs are available over WiFi with `esphome logs`; treat them as a normal debugging path.

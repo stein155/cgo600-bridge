@@ -20,7 +20,9 @@ LOCAL_SOURCE = ["  - source:", "      type: local", "      path: components"]
 
 def main():
     out, in_source, replaced = [], False, False
-    for line in open(SRC, encoding="utf-8").read().splitlines():
+    with open(SRC, encoding="utf-8") as f:
+        lines = f.read().splitlines()
+    for line in lines:
         if line.strip() == "- source:" and not replaced:
             out.extend(LOCAL_SOURCE)
             in_source, replaced = True, True
@@ -30,10 +32,10 @@ def main():
         in_source = False
         out.append(line)
     if not replaced:
-        raise SystemExit("[ESPHOME] No external_components source found in %s" % SRC)
+        raise SystemExit(f"[ESPHOME] No external_components source found in {SRC}")
     with open(OUT, "w", encoding="utf-8") as f:
         f.write("\n".join(out) + "\n")
-    print("[ESPHOME] Wrote %s" % os.path.relpath(OUT, ROOT))
+    print(f"[ESPHOME] Wrote {os.path.relpath(OUT, ROOT)}")
 
 
 if __name__ == "__main__":

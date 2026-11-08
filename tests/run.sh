@@ -16,7 +16,7 @@ if [ -n "${MBEDTLS_PREFIX:-}" ]; then
     flags+=(-I"$MBEDTLS_PREFIX/include" -L"$MBEDTLS_PREFIX/lib")
 fi
 
-c++ -std=c++17 -Wall -Wextra -Werror -I"$src" "${flags[@]}" \
+c++ -std=c++17 -Wall -Wextra -Werror -I"$src" ${flags[@]+"${flags[@]}"} \
     tests/protocol_test.cpp "$src/protocol.cpp" "$src/crypto.cpp" \
     -lmbedcrypto -o "$out"
 "$out"

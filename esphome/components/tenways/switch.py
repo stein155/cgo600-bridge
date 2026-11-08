@@ -1,9 +1,9 @@
 import esphome.codegen as cg
-from esphome.components import switch
 import esphome.config_validation as cv
+from esphome.components import switch
 from esphome.const import CONF_LIGHT
 
-from . import TENWAYS_CHILD_SCHEMA, CONF_TENWAYS_ID, tenways_ns
+from . import CONF_TENWAYS_ID, TENWAYS_CHILD_SCHEMA, tenways_ns
 
 DEPENDENCIES = ["tenways"]
 
@@ -11,9 +11,7 @@ TenwaysLightSwitch = tenways_ns.class_("TenwaysLightSwitch", switch.Switch)
 
 CONFIG_SCHEMA = TENWAYS_CHILD_SCHEMA.extend(
     {
-        cv.Optional(CONF_LIGHT): switch.switch_schema(
-            TenwaysLightSwitch, icon="mdi:lightbulb", block_inverted=True
-        ),
+        cv.Optional(CONF_LIGHT): switch.switch_schema(TenwaysLightSwitch, icon="mdi:lightbulb", block_inverted=True),
     }
 )
 

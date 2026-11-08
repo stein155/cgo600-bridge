@@ -1,9 +1,9 @@
 import esphome.codegen as cg
-from esphome.components import text_sensor
 import esphome.config_validation as cv
+from esphome.components import text_sensor
 from esphome.const import ENTITY_CATEGORY_DIAGNOSTIC, ICON_BLUETOOTH
 
-from . import TENWAYS_CHILD_SCHEMA, CONF_TENWAYS_ID
+from . import CONF_TENWAYS_ID, TENWAYS_CHILD_SCHEMA
 
 DEPENDENCIES = ["tenways"]
 
@@ -22,9 +22,7 @@ TEXT_SENSORS = {
     ),
 }
 
-CONFIG_SCHEMA = TENWAYS_CHILD_SCHEMA.extend(
-    {cv.Optional(key): schema for key, schema in TEXT_SENSORS.items()}
-)
+CONFIG_SCHEMA = TENWAYS_CHILD_SCHEMA.extend({cv.Optional(key): schema for key, schema in TEXT_SENSORS.items()})
 
 
 async def to_code(config):

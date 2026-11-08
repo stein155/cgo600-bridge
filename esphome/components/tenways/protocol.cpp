@@ -6,7 +6,6 @@
 namespace esphome::tenways::protocol {
 
 // Pre-built commands, captured from the Tenways app
-static const uint8_t READ_INIT_BYTES[] = {0x52, 0x02, 0x07, 0x03, 0xF3, 0x6D, 0x45};
 static const uint8_t READ_DATA_BYTES[] = {0x57, 0x0D, 0xFE, 0x0B, 0x07, 0x12, 0x13, 0x14, 0x11,
                                           0x16, 0x17, 0x1A, 0x28, 0x21, 0x15, 0xA2, 0x77, 0x45};
 static const uint8_t BOOTSTRAP_2_BYTES[] = {0x57, 0x04, 0xFD, 0x02, 0xF4, 0x01, 0xEB, 0x50, 0x45};
@@ -14,7 +13,6 @@ static const uint8_t BOOTSTRAP_3_BYTES[] = {0x57, 0x03, 0xFC, 0x01, 0x01, 0x51, 
 static const uint8_t LIGHT_ON_BYTES[] = {0x57, 0x03, 0x21, 0x01, 0x01, 0xC1, 0xD2, 0x45};
 static const uint8_t LIGHT_OFF_BYTES[] = {0x57, 0x03, 0x21, 0x01, 0x00, 0x00, 0x12, 0x45};
 
-const Command READ_INIT_CMD{READ_INIT_BYTES, sizeof(READ_INIT_BYTES)};
 const Command READ_DATA_CMD{READ_DATA_BYTES, sizeof(READ_DATA_BYTES)};
 const Command BOOTSTRAP_CMD_2{BOOTSTRAP_2_BYTES, sizeof(BOOTSTRAP_2_BYTES)};
 const Command BOOTSTRAP_CMD_3{BOOTSTRAP_3_BYTES, sizeof(BOOTSTRAP_3_BYTES)};
@@ -188,27 +186,33 @@ bool FrameParser::feed(BikeState &state, const uint8_t *data, size_t len, uint32
             break;
         }
 
-        if (this->buffer_[frame_len - 1] == FRAME_END) {
-            // Inbound frames carry the CRC high byte first, whereas requests
-            // (build_request) send it low byte first. That asymmetry is how the
-            // bike's protocol behaves.
-            const uint16_t expected = ((uint16_t) this->buffer_[2 + payload_len] << 8) | this->buffer_[3 + payload_len];
-            if (crc16(this->buffer_, 2 + payload_len) != expected) {
-                ++bad_crc;
-            } else {
-                size_t pos = 2;
-                const size_t payload_end = 2 + payload_len;
-                while (pos + 2 <= payload_end) {
-                    const uint8_t field_id = this->buffer_[pos++];
-                    const uint8_t field_len = this->buffer_[pos++];
-                    if (pos + field_len > payload_end) {
-                        break;
-                    }
-                    if (decode_field(state, field_id, this->buffer_ + pos, field_len)) {
-                        changed = true;
-                    }
-                    pos += field_len;
+        if (this->buffer_[frame_len - 1] != FRAME_END) {
+            // Not a frame start after all: search again from the next byte, so a
+            // stray 0x52 cannot swallow the real frames behind it.
+            memmove(this->buffer_, this->buffer_ + 1, this->len_ - 1);
+            --this->len_;
+            continue;
+        }
+
+        // Inbound frames carry the CRC high byte first, whereas requests
+        // (build_request) send it low byte first. That asymmetry is how the
+        // bike's protocol behaves.
+        const uint16_t expected = ((uint16_t) this->buffer_[2 + payload_len] << 8) | this->buffer_[3 + payload_len];
+        if (crc16(this->buffer_, 2 + payload_len) != expected) {
+            ++bad_crc;
+        } else {
+            size_t pos = 2;
+            const size_t payload_end = 2 + payload_len;
+            while (pos + 2 <= payload_end) {
+                const uint8_t field_id = this->buffer_[pos++];
+                const uint8_t field_len = this->buffer_[pos++];
+                if (pos + field_len > payload_end) {
+                    break;
                 }
+                if (decode_field(state, field_id, this->buffer_ + pos, field_len)) {
+                    changed = true;
+                }
+                pos += field_len;
             }
         }
 
@@ -241,7 +245,9 @@ const Profile AGO_AIR_PROFILE{"AGO AIR", KEYS(LONGTAIL_STATUS), KEYS(AGO_AIR_INF
 const Profile AGO_PROFILE{"AGO", KEYS(AGO_STATUS), KEYS(AGO_INFO), false, false, false, false};
 #undef KEYS
 
-static bool starts_with(const char *text, const char *prefix) { return strncmp(text, prefix, strlen(prefix)) == 0; }
+static bool starts_with(const char *text, const char *prefix) {
+    return strncmp(text, prefix, strlen(prefix)) == 0;
+}
 
 const Profile &profile_for(const char *device_name) {
     // Same order as the app's driver selection.
@@ -375,7 +381,9 @@ static bool decode_km_field(BikeState &state, const Profile &profile, uint8_t fi
     }
 }
 
-static bool is_frame_type(uint8_t b) { return b == TYPE_READ || b == TYPE_WRITE; }
+static bool is_frame_type(uint8_t b) {
+    return b == TYPE_READ || b == TYPE_WRITE;
+}
 
 void FrameParser::append_(const uint8_t *data, size_t len) {
     // Unlike the CGO600 parser, keep the start of the buffer: a frame is only
@@ -396,8 +404,7 @@ void FrameParser::append_(const uint8_t *data, size_t len) {
 void FrameParser::resync_() {
     size_t start = 0;
     while (start < this->len_) {
-        if (is_frame_type(this->buffer_[start]) &&
-            (start + 1 >= this->len_ || this->buffer_[start + 1] == HEADER_BYTE))
+        if (is_frame_type(this->buffer_[start]) && (start + 1 >= this->len_ || this->buffer_[start + 1] == HEADER_BYTE))
             break;
         ++start;
     }
@@ -408,8 +415,7 @@ void FrameParser::resync_() {
     }
 }
 
-bool FrameParser::feed(BikeState &state, const uint8_t *data, size_t len, uint32_t &bad_crc,
-                       uint32_t &unhandled) {
+bool FrameParser::feed(BikeState &state, const uint8_t *data, size_t len, uint32_t &bad_crc, uint32_t &unhandled) {
     bool changed = false;
     if (data != nullptr && len > 0) {
         this->append_(data, len);

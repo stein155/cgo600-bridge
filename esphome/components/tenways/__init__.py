@@ -1,6 +1,6 @@
 import esphome.codegen as cg
-from esphome.components import esp32_ble, esp32_ble_client, esp32_ble_tracker
 import esphome.config_validation as cv
+from esphome.components import esp32_ble, esp32_ble_client, esp32_ble_tracker
 from esphome.const import CONF_ID
 
 AUTO_LOAD = ["esp32_ble_client", "esp32_ble_tracker", "sensor", "switch", "text_sensor"]

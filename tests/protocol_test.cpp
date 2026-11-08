@@ -53,17 +53,19 @@ static void test_king_meter_requests() {
     uint8_t out[64];
     const auto &cgo800 = km::CGO800_PROFILE;
     size_t len = km::build_read(out, cgo800.status_keys, cgo800.status_count, cgo800.crc_low_first);
-    check_bytes(out, len, {0x62, 0x00, 0x0C, 0x0B, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0F, 0x11, 0x23,
-                           0xC2, 0x75, 0x45},
-                "CGO800 status request");
+    check_bytes(
+        out, len,
+        {0x62, 0x00, 0x0C, 0x0B, 0x05, 0x06, 0x07, 0x08, 0x09, 0x0A, 0x0B, 0x0C, 0x0F, 0x11, 0x23, 0xC2, 0x75, 0x45},
+        "CGO800 status request");
     len = km::build_read(out, cgo800.info_keys, cgo800.info_count, cgo800.crc_low_first);
     check_bytes(out, len, {0x62, 0x00, 0x03, 0x02, 0x04, 0x05, 0x6B, 0x1E, 0x45}, "CGO800 info request");
 
     const auto &longtail = km::LONGTAIL_PROFILE;
     len = km::build_read(out, longtail.status_keys, longtail.status_count, longtail.crc_low_first);
-    check_bytes(out, len, {0x62, 0x00, 0x0C, 0x0B, 0x06, 0x07, 0x08, 0x09, 0x11, 0x0A, 0x0B, 0x0C, 0x0F, 0x23, 0x4F,
-                           0x84, 0x91, 0x45},
-                "Longtail Duo status request");
+    check_bytes(
+        out, len,
+        {0x62, 0x00, 0x0C, 0x0B, 0x06, 0x07, 0x08, 0x09, 0x11, 0x0A, 0x0B, 0x0C, 0x0F, 0x23, 0x4F, 0x84, 0x91, 0x45},
+        "Longtail Duo status request");
     len = km::build_read(out, longtail.info_keys, longtail.info_count, longtail.crc_low_first);
     check_bytes(out, len, {0x62, 0x00, 0x05, 0x04, 0x04, 0x05, 0x4F, 0x70, 0x8A, 0x12, 0x45},
                 "Longtail Duo info request");
@@ -83,8 +85,7 @@ static void test_king_meter_requests() {
     check(len == 25 && out[0] == 0x63 && out[2] == 0x13 && out[3] == 0x01 && out[4] == 0xD8 && out[5] == 0x10 &&
               out[24] == 0x45,
           "CGO800 handshake random layout");
-    check(km_handshake_value(out, len, km::TYPE_WRITE, KEY_HANDSHAKE_RANDOM) == out + 6,
-          "King Meter handshake value");
+    check(km_handshake_value(out, len, km::TYPE_WRITE, KEY_HANDSHAKE_RANDOM) == out + 6, "King Meter handshake value");
 }
 
 static void test_king_meter_profiles() {
@@ -140,8 +141,8 @@ static void test_king_meter_profile_requests() {
 // differently from the other King Meter drivers.
 static void test_king_meter_profile_values() {
     // Odometer 1201, firmware 01 02 03 or "V12", range 0x0290 (656 km).
-    const Bytes frame = reply({0x62, 0x00, 0x10, 0x03, 0x0C, 0x04, 0x00, 0x00, 0x04, 0xB1, 0x04, 0x03, 0x01, 0x02,
-                               0x03, 0x0B, 0x02, 0x02, 0x90});
+    const Bytes frame = reply({0x62, 0x00, 0x10, 0x03, 0x0C, 0x04, 0x00, 0x00, 0x04, 0xB1, 0x04, 0x03, 0x01, 0x02, 0x03,
+                               0x0B, 0x02, 0x02, 0x90});
     const Bytes ascii = reply({0x62, 0x00, 0x06, 0x01, 0x04, 0x03, 'V', '1', '2'});
     uint32_t bad = 0, unhandled = 0;
 
@@ -165,8 +166,8 @@ static void test_king_meter_profile_values() {
 static void test_king_meter_parser() {
     for (bool low_first : {false, true}) {
         // Battery 57 %, light on, power 300 W, remaining range 42 km, serial.
-        const Bytes frame = reply({0x62, 0x00, 0x14, 0x05, 0x0F, 0x01, 57, 0x11, 0x01, 0x01, 0x23, 0x02, 0x01, 0x2C,
-                                   0x0B, 0x02, 0x00, 42, 0x05, 0x03, 'S', 'N', '1'},
+        const Bytes frame = reply({0x62, 0x00, 0x14, 0x05, 0x0F, 0x01, 57,   0x11, 0x01, 0x01, 0x23, 0x02,
+                                   0x01, 0x2C, 0x0B, 0x02, 0x00, 42,   0x05, 0x03, 'S',  'N',  '1'},
                                   low_first);
         km::FrameParser parser;
         BikeState state;
@@ -235,8 +236,8 @@ static void test_nus_requests() {
 
 static void test_nus_parser() {
     // Firmware "V1.23", power 250 W, battery 57 %.
-    const Bytes frame = reply(
-        {0x52, 14, FIELD_FIRMWARE, 5, 'V', '1', '.', '2', '3', FIELD_POWER, 2, 0x00, 0xFA, FIELD_BATTERY, 1, 57});
+    const Bytes frame =
+        reply({0x52, 14, FIELD_FIRMWARE, 5, 'V', '1', '.', '2', '3', FIELD_POWER, 2, 0x00, 0xFA, FIELD_BATTERY, 1, 57});
     FrameParser parser;
     BikeState state;
     uint32_t bad = 0;
@@ -275,10 +276,9 @@ static void test_crypto() {
     uint8_t packet[64];
     const size_t packet_len = session.wrap(frame, frame_len, packet, sizeof(packet));
     // Same as openssl enc -aes-256-cbc with this key and IV.
-    check_bytes(packet, packet_len,
-                {0xA5, 0x80, 0x20, 0x00, 0x01, 0x6F, 0x9F, 0xD6, 0xAC, 0xFD, 0x1C, 0x3D, 0x6F, 0xC8, 0xE9,
-                 0x17, 0x2E, 0x65, 0xB2, 0xB9, 0xAF, 0xC8, 0xCD, 0x00, 0xD5, 0xF2, 0x78, 0x0B, 0x96, 0x15,
-                 0xDF, 0x0F, 0x51, 0xCB, 0x39, 0xCF, 0xC9, 0x49, 0xEB, 0x5A},
+    check_bytes(packet, packet_len, {0xA5, 0x80, 0x20, 0x00, 0x01, 0x6F, 0x9F, 0xD6, 0xAC, 0xFD, 0x1C, 0x3D, 0x6F, 0xC8,
+                                     0xE9, 0x17, 0x2E, 0x65, 0xB2, 0xB9, 0xAF, 0xC8, 0xCD, 0x00, 0xD5, 0xF2, 0x78, 0x0B,
+                                     0x96, 0x15, 0xDF, 0x0F, 0x51, 0xCB, 0x39, 0xCF, 0xC9, 0x49, 0xEB, 0x5A},
                 "encrypted packet");
 
     uint8_t second[64];
@@ -296,6 +296,72 @@ static void test_crypto() {
     check(idle.wrap(frame, frame_len, packet, sizeof(packet)) == 0, "no packets without a session");
 }
 
+// A stray start byte, chunk boundaries and CRC failures must not lose the
+// real frames around them.
+static void test_nus_parser_resync() {
+    FrameParser parser;
+    BikeState state;
+    uint32_t bad = 0;
+    const Bytes battery = reply({0x52, 3, FIELD_BATTERY, 1, 64});
+    // A stray 0x52 whose length byte claims 0x30 more bytes, then a real frame.
+    Bytes stream = {0x00, 0x52, 0x30, 0x11};
+    stream.insert(stream.end(), battery.begin(), battery.end());
+    stream.resize(stream.size() + 0x40, 0x00);
+    check(parser.feed(state, stream.data(), stream.size(), bad) && state.battery == 64,
+          "CGO600 frame behind a stray start byte");
+
+    // One frame split over three notifications.
+    const Bytes odometer = reply({0x52, 6, FIELD_ODOMETER, 4, 0x00, 0x00, 0x30, 0x39});
+    FrameParser split;
+    BikeState split_state;
+    check(!split.feed(split_state, odometer.data(), 2, bad), "CGO600 waits for the rest of a frame");
+    check(!split.feed(split_state, odometer.data() + 2, 3, bad), "CGO600 still waits");
+    check(split.feed(split_state, odometer.data() + 5, odometer.size() - 5, bad) && split_state.odometer_km > 0,
+          "CGO600 frame split over notifications");
+
+    // A CRC failure is counted and the next frame still parses.
+    Bytes corrupt = reply({0x52, 3, FIELD_BATTERY, 1, 10});
+    corrupt[4] ^= 0xFF;
+    const uint32_t bad_before = bad;
+    Bytes both = corrupt;
+    both.insert(both.end(), battery.begin(), battery.end());
+    FrameParser crc_parser;
+    BikeState crc_state;
+    check(crc_parser.feed(crc_state, both.data(), both.size(), bad) && bad == bad_before + 1 && crc_state.battery == 64,
+          "CGO600 CRC failure counted, next frame parsed");
+}
+
+static void test_nus_light_commands() {
+    // The light commands write field 0x21 with 1 or 0.
+    check(LIGHT_ON_CMD.data[0] == FRAME_WRITE && LIGHT_OFF_CMD.data[0] == FRAME_WRITE, "light commands are writes");
+    check(LIGHT_ON_CMD.len == LIGHT_OFF_CMD.len, "light commands have the same layout");
+    uint8_t on[16], off[16];
+    static const uint8_t ONE[] = {1}, ZERO[] = {0};
+    const size_t on_len = build_write(on, FIELD_LIGHT, ONE, 1);
+    const size_t off_len = build_write(off, FIELD_LIGHT, ZERO, 1);
+    check_bytes(LIGHT_ON_CMD.data, LIGHT_ON_CMD.len, Bytes(on, on + on_len), "light on matches build_write");
+    check_bytes(LIGHT_OFF_CMD.data, LIGHT_OFF_CMD.len, Bytes(off, off + off_len), "light off matches build_write");
+}
+
+// unwrap() reads the end byte at the packet's own length, so bytes after the
+// packet are ignored and a truncated packet is rejected.
+static void test_crypto_packet_bounds() {
+    uint8_t key[32] = {0}, iv[16] = {0};
+    Session session;
+    session.start(key, iv);
+    const auto &cgo800 = km::CGO800_PROFILE;
+    uint8_t frame[32];
+    const size_t frame_len = km::build_read(frame, cgo800.status_keys, cgo800.status_count, true);
+    uint8_t packet[80];
+    const size_t packet_len = session.wrap(frame, frame_len, packet, sizeof(packet));
+    uint8_t plain[64];
+    packet[packet_len] = 0xEE;  // trailing byte
+    check(session.unwrap(packet, packet_len + 1, plain, sizeof(plain)) == frame_len, "trailing byte ignored");
+    check(session.unwrap(packet, packet_len - 1, plain, sizeof(plain)) == 0, "truncated packet rejected");
+    uint8_t small[8];
+    check(session.wrap(frame, frame_len, small, sizeof(small)) == 0, "wrap refuses a buffer that is too small");
+}
+
 int main() {
     test_king_meter_requests();
     test_king_meter_profiles();
@@ -305,6 +371,9 @@ int main() {
     test_nus_requests();
     test_nus_parser();
     test_crypto();
+    test_nus_parser_resync();
+    test_nus_light_commands();
+    test_crypto_packet_bounds();
     if (failures != 0) {
         printf("%d check(s) failed\n", failures);
         return 1;

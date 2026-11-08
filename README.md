@@ -190,11 +190,12 @@ Version 2 is a breaking release:
 
 ```bash
 tests/run.sh                          # host tests of the protocol code (needs mbedtls)
+./lint.sh                             # clang-format, ruff, yamllint, shellcheck (requirements-lint.txt)
 esphome compile esphome/dev.yaml      # two bikes; copy esphome/secrets.yaml.example first
 esphome logs esphome/dev.yaml --device <bridge-ip>
 ```
 
-CI runs the host tests and compiles `esphome/dev.yaml` and the installer configuration. See
+CI runs the linters and the host tests, and compiles `esphome/dev.yaml` and the installer configuration. See
 [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License

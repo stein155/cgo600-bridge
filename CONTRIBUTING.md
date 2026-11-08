@@ -18,6 +18,7 @@ Install [ESPHome](https://esphome.io/guides/installing_esphome) at the version p
 
 ```bash
 tests/run.sh                                            # host tests, needs mbedtls
+pip install -r requirements-lint.txt && ./lint.sh       # the lint gate CI runs; --fix applies fixes
 cp esphome/secrets.yaml.example esphome/secrets.yaml    # fill in WiFi and keys
 esphome run esphome/dev.yaml                            # compile and flash over USB or WiFi
 esphome logs esphome/dev.yaml                           # live logs over WiFi

@@ -13,7 +13,7 @@ static constexpr uint8_t PACKET_END = 0x5A;
 static constexpr uint8_t PACKET_ENCRYPTED = 0x80;
 static constexpr size_t BLOCK = 16;
 // Largest padded frame wrap() encrypts; requests are far smaller.
-static constexpr size_t KM_MAX_PLAIN = 256;
+static constexpr size_t MAX_PLAIN = 256;
 
 // The input key of the session key derivation, fixed in the Tenways app.
 static const uint8_t SESSION_SECRET[32] = {0x12, 0x34, 0x56, 0x78, 0x90, 0xAB, 0xCD, 0xEF, 0x11, 0x22, 0x33,
@@ -96,7 +96,7 @@ size_t Session::wrap(const uint8_t *frame, size_t len, uint8_t *out, size_t out_
     memcpy(cipher, frame, len);
     memset(cipher + len, (int) (cipher_len - len), cipher_len - len);
 
-    uint8_t padded[KM_MAX_PLAIN];
+    uint8_t padded[MAX_PLAIN];
     if (cipher_len > sizeof(padded))
         return 0;
     memcpy(padded, cipher, cipher_len);
@@ -117,11 +117,11 @@ size_t Session::wrap(const uint8_t *frame, size_t len, uint8_t *out, size_t out_
 }
 
 size_t Session::unwrap(const uint8_t *packet, size_t len, uint8_t *out, size_t out_size) {
-    if (len < PACKET_OVERHEAD || packet[0] != PACKET_START || packet[len - 1] != PACKET_END)
+    if (len < PACKET_OVERHEAD || packet[0] != PACKET_START)
         return 0;
     const bool encrypted = (packet[1] & PACKET_ENCRYPTED) != 0;
     const size_t payload_len = ((size_t) (packet[1] & 0x7F) << 8) | packet[2];
-    if (len < payload_len + PACKET_OVERHEAD || payload_len > out_size)
+    if (len < payload_len + PACKET_OVERHEAD || payload_len > out_size || packet[7 + payload_len] != PACKET_END)
         return 0;
     const uint16_t expected = ((uint16_t) packet[5 + payload_len] << 8) | packet[6 + payload_len];
     if (crc16(packet, 5 + payload_len) != expected)

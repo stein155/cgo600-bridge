@@ -71,7 +71,7 @@ class TenwaysComponent : public esp32_ble_client::BLEClientBase, public bike_sca
     void log_services_();
     void log_bytes_(const char *what, uint16_t handle, const uint8_t *data, size_t len, bool debug);
     void log_km_summary_();
-    void run_handshake_step_(uint32_t now);
+    void run_handshake_(uint32_t now);
     bool write_(const protocol::Command &cmd);
     bool write_(const uint8_t *data, size_t len, bool with_response = false);
     void flush_tx_(uint32_t now);
@@ -80,6 +80,7 @@ class TenwaysComponent : public esp32_ble_client::BLEClientBase, public bike_sca
     bool write_km_read_(const uint8_t *keys, uint8_t count);
     void finish_handshake_(uint32_t now);
     bool is_nus_variant_() const;
+    bool name_wants_response_() const;
     void start_encryption_(uint32_t now);
     bool encryption_pending_(uint32_t now);
     bool handle_enc_handshake_reply_(const uint8_t *data, size_t len);
@@ -104,18 +105,16 @@ class TenwaysComponent : public esp32_ble_client::BLEClientBase, public bike_sca
 
     Phase phase_{Phase::IDLE};
     Transport transport_{Transport::NONE};
-    uint8_t handshake_step_{0};
     uint32_t next_step_at_{0};
     uint32_t connect_started_ms_{0};
+    bool got_data_{false};
     uint32_t last_poll_{0};
     uint32_t last_static_request_{0};
-    uint32_t bad_crc_count_{0};
     // Handshake waits until the bike confirms the notification subscription.
     uint16_t cccd_handle_{0};
     bool cccd_confirmed_{false};
     uint32_t cccd_deadline_{0};
-    // Per-connection traffic; logged as a periodic summary for King Meter
-    // displays.
+    // Per-connection traffic; King Meter displays log it as a periodic summary.
     struct LinkStats {
         uint32_t requests{0};
         uint32_t notifications{0};
@@ -150,7 +149,8 @@ class TenwaysComponent : public esp32_ble_client::BLEClientBase, public bike_sca
     uint8_t tx_head_{0};
     uint8_t tx_count_{0};
     uint32_t last_tx_ms_{0};
-    // Encrypted displays are written with response, as the Tenways app does.
+    // Encrypted King Meter displays are written with response, as the Tenways
+    // app does.
     bool enc_write_with_response_{false};
     // Models the app always writes with response: some by profile, and every
     // model whose name ends in _D.
@@ -160,8 +160,9 @@ class TenwaysComponent : public esp32_ble_client::BLEClientBase, public bike_sca
     protocol::Session enc_session_;
     // After a light command, light reports that still show the old state are
     // ignored until this deadline; the bike applies the change with a delay.
-    uint32_t light_pending_until_{0};
+    bool light_pending_{false};
     bool light_pending_on_{false};
+    uint32_t light_pending_until_{0};
     uint16_t tx_handle_{0};
     uint16_t rx_handle_{0};
 

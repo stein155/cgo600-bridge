@@ -10,6 +10,8 @@ namespace esphome::tenways::protocol {
 
 static constexpr uint8_t FRAME_START = 0x52;
 static constexpr uint8_t FRAME_END = 0x45;
+// First byte of a write that sets a field.
+static constexpr uint8_t FRAME_WRITE = 0x57;
 
 // Field IDs inferred from the Tenways app protocol
 static constexpr uint8_t FIELD_FIRMWARE = 0x03;
@@ -24,14 +26,12 @@ static constexpr uint8_t FIELD_ODOMETER = 0x17;
 static constexpr uint8_t FIELD_BATTERY = 0x1A;
 static constexpr uint8_t FIELD_LIGHT = 0x21;
 static constexpr uint8_t FIELD_POWER = 0x23;
-static constexpr uint8_t FRAME_WRITE = 0x57;
 
 struct Command {
     const uint8_t *data;
     size_t len;
 };
 
-extern const Command READ_INIT_CMD;
 extern const Command READ_DATA_CMD;
 extern const Command BOOTSTRAP_CMD_2;
 extern const Command BOOTSTRAP_CMD_3;
@@ -153,8 +153,7 @@ class FrameParser {
     }
     // Same contract as protocol::FrameParser::feed. Valid frames that carry
     // nothing we decode (writes, unknown commands) are counted in unhandled.
-    bool feed(BikeState &state, const uint8_t *data, size_t len, uint32_t &bad_crc,
-              uint32_t &unhandled);
+    bool feed(BikeState &state, const uint8_t *data, size_t len, uint32_t &bad_crc, uint32_t &unhandled);
     void set_profile(const Profile *profile) { this->profile_ = profile; }
 
     // Diagnostics since the last reset: frames that passed the CRC check, and

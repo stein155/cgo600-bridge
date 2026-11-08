@@ -1,6 +1,6 @@
 import esphome.codegen as cg
-from esphome.components import sensor
 import esphome.config_validation as cv
+from esphome.components import sensor
 from esphome.const import (
     DEVICE_CLASS_BATTERY,
     DEVICE_CLASS_DISTANCE,
@@ -16,7 +16,7 @@ from esphome.const import (
     UNIT_WATT,
 )
 
-from . import TENWAYS_CHILD_SCHEMA, CONF_TENWAYS_ID
+from . import CONF_TENWAYS_ID, TENWAYS_CHILD_SCHEMA
 
 DEPENDENCIES = ["tenways"]
 
@@ -77,9 +77,7 @@ SENSORS = {
     ),
 }
 
-CONFIG_SCHEMA = TENWAYS_CHILD_SCHEMA.extend(
-    {cv.Optional(key): schema for key, schema in SENSORS.items()}
-)
+CONFIG_SCHEMA = TENWAYS_CHILD_SCHEMA.extend({cv.Optional(key): schema for key, schema in SENSORS.items()})
 
 
 async def to_code(config):

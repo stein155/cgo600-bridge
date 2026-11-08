@@ -23,7 +23,7 @@ ESPHOME_BUILD = os.path.join(ROOT, "esphome", ".esphome", "build", "tenways-brid
 
 def _copy(src, dest):
     if not os.path.isfile(src):
-        raise SystemExit("[SITE] Missing build output: %s" % src)
+        raise SystemExit(f"[SITE] Missing build output: {src}")
     os.makedirs(os.path.dirname(dest), exist_ok=True)
     shutil.copyfile(src, dest)
 
@@ -60,7 +60,7 @@ def build(version, out_dir):
             ],
         },
     )
-    print("[SITE] Installer for %s written to %s" % (version, out_dir))
+    print(f"[SITE] Installer for {version} written to {out_dir}")
 
 
 if __name__ == "__main__":
