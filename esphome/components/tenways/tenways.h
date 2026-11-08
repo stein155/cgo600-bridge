@@ -15,18 +15,18 @@
 #include "esphome/core/preferences.h"
 #include "crypto.h"
 #include "protocol.h"
+#include "scan_coordinator.h"
 
-namespace esphome::ebike {
+namespace esphome::tenways {
 
 namespace espbt = esphome::esp32_ble_tracker;
 
-// BLE client for one e-bike display. Unlike the stock ble_client it needs no
+// BLE client for one Tenways display. Unlike the stock ble_client it needs no
 // MAC address: it connects to the first advertiser whose name contains one of
 // device_names, or that advertises no name but a known service, and that no
 // other block holds. The transport follows from the services: Nordic UART
-// (CGO600), King Meter (newer Tenways displays) or Microchip transparent UART
-// (B06 displays of the BIKEGO plus app).
-class EBikeComponent : public esp32_ble_client::BLEClientBase {
+// (CGO600 family) or King Meter (newer Tenways displays).
+class TenwaysComponent : public esp32_ble_client::BLEClientBase, public bike_scan_v1::ScanUser {
  public:
     void setup() override;
     void loop() override;
@@ -37,13 +37,12 @@ class EBikeComponent : public esp32_ble_client::BLEClientBase {
     void set_state(espbt::ClientState state) override;
     void connect() override;
     void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param) override;
+    bool needs_scan() const override { return this->phase_ == Phase::IDLE; }
 
     // Key of this bike's state in flash; the block's id.
     void set_storage_key(const std::string &key) { this->storage_key_ = key; }
     void set_device_names(const std::vector<std::string> &names) { this->device_names_ = names; }
     void set_poll_interval(uint32_t ms) { this->poll_interval_ms_ = ms; }
-    // 0 keeps the bike connected for as long as it is in range.
-    void set_max_connection_time(uint32_t ms) { this->max_connection_ms_ = ms; }
 
     void set_battery_sensor(sensor::Sensor *s) { this->battery_sensor_ = s; }
     void set_speed_sensor(sensor::Sensor *s) { this->speed_sensor_ = s; }
@@ -64,7 +63,7 @@ class EBikeComponent : public esp32_ble_client::BLEClientBase {
 
  protected:
     enum class Phase : uint8_t { IDLE, HANDSHAKE, POLLING };
-    enum class Transport : uint8_t { NONE, NUS, KING_METER, B06 };
+    enum class Transport : uint8_t { NONE, NUS, KING_METER };
 
     bool matches_(const espbt::ESPBTDevice &device) const;
     bool claimed_by_other_(uint64_t address) const;
@@ -73,8 +72,6 @@ class EBikeComponent : public esp32_ble_client::BLEClientBase {
     void log_bytes_(const char *what, uint16_t handle, const uint8_t *data, size_t len, bool debug);
     void log_km_summary_();
     void run_handshake_step_(uint32_t now);
-    void run_b06_handshake_(uint32_t now);
-    void handle_b06_auth_();
     bool write_(const protocol::Command &cmd);
     bool write_(const uint8_t *data, size_t len, bool with_response = false);
     void flush_tx_(uint32_t now);
@@ -93,25 +90,17 @@ class EBikeComponent : public esp32_ble_client::BLEClientBase {
     void reset_session_();
     void restore_last_state_();
     void save_last_state_();
-    void pause_scanning_();
-    void resume_scanning_();
     void publish_state_();
     void update_ble_status_();
 
-    // Every bike block, so blocks never connect to the same bike and scanning
-    // only pauses once all of them are connected.
-    static std::vector<EBikeComponent *> instances_;
-    static bool scan_paused_;
+    // Every bike block, so blocks never connect to the same bike.
+    static std::vector<TenwaysComponent *> instances_;
 
     std::string storage_key_;
     std::vector<std::string> device_names_;
     // Advertised name of the bike being connected; picks the King Meter profile.
     std::string bike_name_;
     uint32_t poll_interval_ms_{1000};
-    uint32_t max_connection_ms_{0};
-    // The bike disconnected after max_connection_time, and when it last advertised.
-    uint64_t resting_address_{0};
-    uint32_t resting_seen_ms_{0};
 
     Phase phase_{Phase::IDLE};
     Transport transport_{Transport::NONE};
@@ -125,8 +114,8 @@ class EBikeComponent : public esp32_ble_client::BLEClientBase {
     uint16_t cccd_handle_{0};
     bool cccd_confirmed_{false};
     uint32_t cccd_deadline_{0};
-    // Per-connection traffic; logged as a periodic summary for King Meter and
-    // B06 displays.
+    // Per-connection traffic; logged as a periodic summary for King Meter
+    // displays.
     struct LinkStats {
         uint32_t requests{0};
         uint32_t notifications{0};
@@ -188,7 +177,6 @@ class EBikeComponent : public esp32_ble_client::BLEClientBase {
     uint32_t last_state_saved_ms_{0};
     protocol::FrameParser parser_;
     protocol::km::FrameParser km_parser_;
-    protocol::b06::FrameParser b06_parser_;
     const char *last_ble_status_{nullptr};
 
     sensor::Sensor *battery_sensor_{nullptr};
@@ -206,11 +194,11 @@ class EBikeComponent : public esp32_ble_client::BLEClientBase {
     switch_::Switch *light_switch_{nullptr};
 };
 
-class EBikeLightSwitch : public switch_::Switch, public Parented<EBikeComponent> {
+class TenwaysLightSwitch : public switch_::Switch, public Parented<TenwaysComponent> {
  protected:
     void write_state(bool state) override;
 };
 
-}  // namespace esphome::ebike
+}  // namespace esphome::tenways
 
 #endif  // USE_ESP32

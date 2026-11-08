@@ -22,7 +22,7 @@ body:
     id: display
     attributes:
       label: Bike and display
-      placeholder: Tenways CGO600, B06 display, ...
+      placeholder: Tenways CGO600, CGO800, ...
     validations:
       required: true
   - type: dropdown

@@ -1,8 +1,12 @@
 # AGENTS.md
 ## Scope
-This repo contains the CGO600 BLE bridge as an ESPHome external component:
-- ESPHome component in `esphome/components/cgo/`
+This repo contains the Tenways BLE bridge as an ESPHome external component:
+- ESPHome component in `esphome/components/tenways/`
+- Home Assistant ride blueprint in `homeassistant/blueprints/`
 - Web installer in `installer/`
+
+Only Tenways displays belong here. Other displays live in their own repositories and
+run next to this component through `scan_coordinator.h`.
 
 ## Rule Files
 No additional agent/editor rule files currently exist in this repo:
@@ -11,62 +15,59 @@ No additional agent/editor rule files currently exist in this repo:
 - `.github/copilot-instructions.md`
 
 ## Important Paths
-- `esphome/components/cgo/__init__.py`: config schema, codegen, embedding of the dashboard
-- `esphome/components/cgo/cgo.h/.cpp`: BLE client (discovery, handshake, polling, entities)
-- `esphome/components/cgo/cgo_protocol.h/.cpp`: frames, CRC-16/MODBUS, field decoding
-- `esphome/components/cgo/ride_log.h/.cpp`: ride inference and NVS storage
-- `esphome/components/cgo/web_ui.h/.cpp`: dashboard and JSON API on ESPHome's web server
-- `esphome/components/cgo/web/`: dashboard sources (`js/`, `css/`, static files)
-- `esphome/components/cgo/web_assets.py`: bundles and gzips `web/` at compile time
-- `esphome/cgo600-install.yaml`: configuration flashed by the web installer
-- `esphome/cgo600.yaml`: development configuration (uses `esphome/secrets.yaml`)
+- `esphome/components/tenways/__init__.py`: config schema and codegen
+- `esphome/components/tenways/tenways.h/.cpp`: BLE client (discovery, handshake, polling, entities)
+- `esphome/components/tenways/protocol.h/.cpp`: Nordic UART and King Meter frames, CRC-16/MODBUS, field decoding
+- `esphome/components/tenways/crypto.h/.cpp`: the encrypted session of the CGO800 Plus and CGO600 variants
+- `esphome/components/tenways/scan_coordinator.h`: scan pausing shared with other bike components; keep it
+  identical to the copies in those repositories
+- `esphome/tenways-bridge.yaml`: configuration flashed by the web installer
+- `esphome/bike.yaml`: package for one bike as its own Home Assistant device
+- `esphome/dev.yaml`: development configuration with two bikes (uses `esphome/secrets.yaml`)
 - `installer/`: web installer page and site assembly
-- `.github/workflows/esphome.yml`: compile CI; `.github/workflows/installer.yml`: Pages + release assets
+- `.github/workflows/esphome.yml`: tests and compile CI; `.github/workflows/installer.yml`: Pages + release assets
 
 ## Environment
-Install ESPHome (`pip install esphome==2026.6.5`, the version pinned in CI).
-Copy `esphome/secrets.yaml.example` to `esphome/secrets.yaml` before compiling `esphome/cgo600.yaml`.
+Install ESPHome (`pip install esphome==2026.10.0`, the version pinned in CI; it needs Python 3.12 or newer).
+Copy `esphome/secrets.yaml.example` to `esphome/secrets.yaml` before compiling `esphome/dev.yaml`.
 
 ## Commands
 Preferred commands from repo root:
 
 ```bash
-esphome compile esphome/cgo600.yaml
-esphome upload esphome/cgo600.yaml --device <bridge-ip>
-esphome logs esphome/cgo600.yaml --device <bridge-ip>
+tests/run.sh
+esphome compile esphome/dev.yaml
+esphome upload esphome/dev.yaml --device <bridge-ip>
+esphome logs esphome/dev.yaml --device <bridge-ip>
 python3 installer/local_esphome_config.py && esphome compile esphome/.install-ci.yaml
-python3 esphome/components/cgo/web_assets.py
 ```
 
 `esphome upload` only uploads the last build; run `compile` first after changes.
-
-CI compiles `esphome/cgo600.yaml` and the install configuration.
 
 ## Tests
 `tests/run.sh` runs the host tests of the protocol code (frames, parsing, encryption); it needs mbedtls
 (`libmbedtls-dev`, or `brew install mbedtls@3`). Everything else is validated manually:
 1. Run `tests/run.sh` and compile both configurations.
 2. Flash hardware if needed.
-3. Verify the logs, BLE connection, Home Assistant entities, the dashboard and the ride history.
+3. Verify the logs, BLE connection and the Home Assistant entities.
 
 ## Code Style
 - Follow ESPHome conventions: `snake_case` methods, trailing-underscore protected members, `this->`,
-  `ESP_LOG*` with the component tags (`cgo`, `cgo.rides`, `cgo.web`).
+  `ESP_LOG*` with the component tag `tenways`.
 - Use 4-space indentation and same-line opening braces (see `.clang-format`).
 - Prefer bounded buffer operations such as `snprintf`.
-- Code running on the HTTP server task must not touch BLE or NVS directly; `defer()` it to the main loop.
-- ESPHome's ESP-IDF web server only sends status codes 200, 404 and 409; anything else becomes 500.
+- `BLEClientBase` disables `loop()` while the client is idle; work that must run while no bike is connected
+  belongs on the scheduler (`set_timeout`, `set_interval`).
 
 ## Naming
 - Keep entity keys stable: `battery`, `speed`, `max_speed`, `avg_speed`, `trip_distance`, `trip_duration`,
-  `remaining_range`, `range`, `serial_number`, `ble_status`, `light`.
-- Keep the dashboard JSON fields and the `esphome.cgo_ride` event name stable.
+  `remaining_range`, `odometer`, `power`, `serial_number`, `firmware_version`, `ble_status`, `light`.
+- Keep the `tenways_ride` event name of the blueprint stable.
 
 ## Files To Treat Carefully
 - `esphome/.esphome/`: build output, ignored by Git
 - `esphome/secrets.yaml`: local credentials, ignored by Git
-- `esphome/components/cgo/ride_log.h`: changing the `Store` layout needs a new `STORE_MAGIC`,
-  which discards stored rides
+- `protocol::BikeState`: changing its layout needs a new `LAST_STATE_MAGIC` in `tenways.cpp`
 
 ## Workflow Notes
 - At minimum ensure both configurations compile.

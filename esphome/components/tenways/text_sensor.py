@@ -3,9 +3,9 @@ from esphome.components import text_sensor
 import esphome.config_validation as cv
 from esphome.const import ENTITY_CATEGORY_DIAGNOSTIC, ICON_BLUETOOTH
 
-from . import EBIKE_CHILD_SCHEMA, CONF_EBIKE_ID
+from . import TENWAYS_CHILD_SCHEMA, CONF_TENWAYS_ID
 
-DEPENDENCIES = ["ebike"]
+DEPENDENCIES = ["tenways"]
 
 TEXT_SENSORS = {
     "serial_number": text_sensor.text_sensor_schema(
@@ -22,13 +22,13 @@ TEXT_SENSORS = {
     ),
 }
 
-CONFIG_SCHEMA = EBIKE_CHILD_SCHEMA.extend(
+CONFIG_SCHEMA = TENWAYS_CHILD_SCHEMA.extend(
     {cv.Optional(key): schema for key, schema in TEXT_SENSORS.items()}
 )
 
 
 async def to_code(config):
-    hub = await cg.get_variable(config[CONF_EBIKE_ID])
+    hub = await cg.get_variable(config[CONF_TENWAYS_ID])
     for key in TEXT_SENSORS:
         if key in config:
             sens = await text_sensor.new_text_sensor(config[key])

@@ -16,9 +16,9 @@ from esphome.const import (
     UNIT_WATT,
 )
 
-from . import EBIKE_CHILD_SCHEMA, CONF_EBIKE_ID
+from . import TENWAYS_CHILD_SCHEMA, CONF_TENWAYS_ID
 
-DEPENDENCIES = ["ebike"]
+DEPENDENCIES = ["tenways"]
 
 
 def _speed(icon):
@@ -77,13 +77,13 @@ SENSORS = {
     ),
 }
 
-CONFIG_SCHEMA = EBIKE_CHILD_SCHEMA.extend(
+CONFIG_SCHEMA = TENWAYS_CHILD_SCHEMA.extend(
     {cv.Optional(key): schema for key, schema in SENSORS.items()}
 )
 
 
 async def to_code(config):
-    hub = await cg.get_variable(config[CONF_EBIKE_ID])
+    hub = await cg.get_variable(config[CONF_TENWAYS_ID])
     for key in SENSORS:
         if key in config:
             sens = await sensor.new_sensor(config[key])

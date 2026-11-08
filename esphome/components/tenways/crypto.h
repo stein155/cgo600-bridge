@@ -11,7 +11,7 @@
 #include <cstddef>
 #include <cstdint>
 
-namespace esphome::ebike::protocol {
+namespace esphome::tenways::protocol {
 
 static constexpr uint8_t KEY_HANDSHAKE_RANDOM = 0xD8;
 static constexpr uint8_t KEY_HANDSHAKE_IV = 0xD2;
@@ -21,10 +21,6 @@ static constexpr size_t PACKET_OVERHEAD = 8;  // 0xA5, len, seq, crc, 0x5A
 // HKDF-SHA256 with the app's random as salt, the app's fixed secret as input
 // key and the display's random as info.
 bool derive_session_key(const uint8_t app_random[16], const uint8_t device_random[16], uint8_t key[32]);
-
-// The B06 display's challenge-response: AES-128-ECB with a key fixed in the
-// BIKEGO plus app over the 4-byte challenge padded with zeros to one block.
-bool b06_auth_answer(const uint8_t challenge[4], uint8_t answer[16]);
 
 // Returns the 16-byte value of a handshake reply
 // ([type] 0x00 [len] 0x01 [key] 0x10 [value...]), or nullptr for other frames.
@@ -52,4 +48,4 @@ class Session {
     bool active_{false};
 };
 
-}  // namespace esphome::ebike::protocol
+}  // namespace esphome::tenways::protocol

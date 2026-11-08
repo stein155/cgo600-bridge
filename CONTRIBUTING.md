@@ -4,8 +4,8 @@ Contributions are welcome. This is a small, independent hobby project.
 
 ## Layout
 
-- `esphome/components/ebike/`: the ESPHome component (C++ and Python)
-- `esphome/ebike-bridge.yaml`: the configuration the web installer flashes
+- `esphome/components/tenways/`: the ESPHome component (C++ and Python)
+- `esphome/tenways-bridge.yaml`: the configuration the web installer flashes
 - `esphome/bike.yaml`, `esphome/dev.yaml`: per-bike package and development configuration
 - `homeassistant/blueprints/`: Home Assistant blueprints
 - `installer/`: the web installer page and the scripts that publish it

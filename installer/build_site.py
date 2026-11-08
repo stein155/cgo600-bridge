@@ -18,7 +18,7 @@ import os
 import shutil
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-ESPHOME_BUILD = os.path.join(ROOT, "esphome", ".esphome", "build", "ebike-bridge", ".pioenvs", "ebike-bridge")
+ESPHOME_BUILD = os.path.join(ROOT, "esphome", ".esphome", "build", "tenways-bridge", ".pioenvs", "tenways-bridge")
 
 
 def _copy(src, dest):
@@ -43,19 +43,19 @@ def build(version, out_dir):
 
     _copy(
         os.path.join(ESPHOME_BUILD, "firmware.factory.bin"),
-        os.path.join(out_dir, "esphome", "ebike-bridge.factory.bin"),
+        os.path.join(out_dir, "esphome", "tenways-bridge.factory.bin"),
     )
     _write_manifest(
         os.path.join(out_dir, "manifest.json"),
         {
-            "name": "E-bike Bridge",
+            "name": "Tenways Bridge",
             "version": version,
             "home_assistant_domain": "esphome",
             "new_install_prompt_erase": True,
             "builds": [
                 {
                     "chipFamily": "ESP32",
-                    "parts": [{"path": "esphome/ebike-bridge.factory.bin", "offset": 0}],
+                    "parts": [{"path": "esphome/tenways-bridge.factory.bin", "offset": 0}],
                 }
             ],
         },

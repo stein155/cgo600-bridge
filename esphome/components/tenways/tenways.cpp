@@ -1,4 +1,4 @@
-#include "ebike.h"
+#include "tenways.h"
 
 #ifdef USE_ESP32
 
@@ -11,9 +11,9 @@
 #include "esphome/core/hal.h"
 #include "esphome/core/log.h"
 
-namespace esphome::ebike {
+namespace esphome::tenways {
 
-static const char *const TAG = "ebike";
+static const char *const TAG = "tenways";
 
 static constexpr uint32_t SUBSCRIBE_SETTLE_MS = 50;
 static constexpr uint32_t STATIC_REQUEST_INTERVAL_MS = 15000;
@@ -26,9 +26,6 @@ static constexpr uint32_t TX_SPACING_MS = 150;
 // time to try the encryption handshake and the other request layouts.
 static constexpr uint32_t DATA_TIMEOUT_MS = 15000;
 static constexpr uint32_t FIRST_DATA_TIMEOUT_MS = 30000;
-// After max_connection_time the bike is left alone until it has not advertised
-// for this long: it was switched off or ridden away.
-static constexpr uint32_t BIKE_GONE_MS = 60000;
 static constexpr uint32_t LIGHT_CONFIRM_WINDOW_MS = 2000;
 static constexpr uint32_t CCCD_CONFIRM_TIMEOUT_MS = 1000;
 // King Meter support is unconfirmed on most bikes: log the first traffic of
@@ -44,8 +41,6 @@ static constexpr size_t MAX_FRAME_LEN = 256;
 // encryption handshake (variants) or the requests of older app versions.
 static constexpr uint32_t NUS_FALLBACK_AFTER_MS = 5000;
 static constexpr size_t MAX_LOGGED_BYTES = 128;  // fits a full status frame
-// The BIKEGO plus app gives the display 10 s to answer the authentication.
-static constexpr uint32_t B06_AUTH_TIMEOUT_MS = 10000;
 // Bump when protocol::BikeState changes layout; older data is then ignored.
 static constexpr uint32_t LAST_STATE_MAGIC = 0x43475303;
 static constexpr uint32_t LAST_STATE_SAVE_INTERVAL_MS = 5 * 60 * 1000;
@@ -58,10 +53,6 @@ static const espbt::ESPBTUUID NUS_TX_UUID = espbt::ESPBTUUID::from_raw("6e400003
 static const espbt::ESPBTUUID KM_SERVICE_UUID = espbt::ESPBTUUID::from_raw("43480001-f001-4b49-4e47-204d45544552");
 static const espbt::ESPBTUUID KM_WRITE_UUID = espbt::ESPBTUUID::from_raw("43480002-f001-4b49-4e47-204d45544552");
 static const espbt::ESPBTUUID KM_NOTIFY_UUID = espbt::ESPBTUUID::from_raw("43480003-f001-4b49-4e47-204d45544552");
-// Microchip transparent UART, used by B06 displays.
-static const espbt::ESPBTUUID B06_SERVICE_UUID = espbt::ESPBTUUID::from_raw("49535343-fe7d-4ae5-8fa9-9fafd205e455");
-static const espbt::ESPBTUUID B06_NOTIFY_UUID = espbt::ESPBTUUID::from_raw("49535343-1e4d-4bd9-ba61-23c647249616");
-static const espbt::ESPBTUUID B06_WRITE_UUID = espbt::ESPBTUUID::from_raw("49535343-8841-43f4-a8d4-ecbe34729bb3");
 
 // Displays report errors as AT commands to their Bluetooth module, which
 // forwards them as notifications.
@@ -84,27 +75,22 @@ static bool contains_ignore_case(const std::string &haystack, const std::string 
     return false;
 }
 
-std::vector<EBikeComponent *> EBikeComponent::instances_;
-bool EBikeComponent::scan_paused_ = false;
+std::vector<TenwaysComponent *> TenwaysComponent::instances_;
 
-void EBikeComponent::setup() {
+void TenwaysComponent::setup() {
     BLEClientBase::setup();
     instances_.push_back(this);
+    bike_scan_v1::add_user(this);
     this->restore_last_state_();
     this->update_ble_status_();
 }
 
 
-void EBikeComponent::dump_config() {
-    ESP_LOGCONFIG(TAG, "E-bike:");
+void TenwaysComponent::dump_config() {
+    ESP_LOGCONFIG(TAG, "Tenways bike:");
     for (const auto &name : this->device_names_)
         ESP_LOGCONFIG(TAG, "  Device name: %s", name.c_str());
     ESP_LOGCONFIG(TAG, "  Poll interval: %u ms", (unsigned) this->poll_interval_ms_);
-    if (this->max_connection_ms_ != 0) {
-        ESP_LOGCONFIG(TAG, "  Max connection time: %u s", (unsigned) (this->max_connection_ms_ / 1000));
-    } else {
-        ESP_LOGCONFIG(TAG, "  Max connection time: unlimited");
-    }
     LOG_SENSOR("  ", "Battery", this->battery_sensor_);
     LOG_SENSOR("  ", "Speed", this->speed_sensor_);
     LOG_SENSOR("  ", "Max speed", this->max_speed_sensor_);
@@ -120,7 +106,7 @@ void EBikeComponent::dump_config() {
     LOG_SWITCH("  ", "Light", this->light_switch_);
 }
 
-bool EBikeComponent::matches_(const espbt::ESPBTDevice &device) const {
+bool TenwaysComponent::matches_(const espbt::ESPBTDevice &device) const {
     for (const auto &name : this->device_names_) {
         if (contains_ignore_case(device.get_name(), name))
             return true;
@@ -129,28 +115,23 @@ bool EBikeComponent::matches_(const espbt::ESPBTDevice &device) const {
     if (!device.get_name().empty())
         return false;
     for (const auto &uuid : device.get_service_uuids()) {
-        if (uuid == NUS_SERVICE_UUID || uuid == KM_SERVICE_UUID || uuid == B06_SERVICE_UUID)
+        if (uuid == NUS_SERVICE_UUID || uuid == KM_SERVICE_UUID)
             return true;
     }
     return false;
 }
 
-bool EBikeComponent::claimed_by_other_(uint64_t address) const {
+bool TenwaysComponent::claimed_by_other_(uint64_t address) const {
     for (const auto *other : instances_) {
         if (other == this)
             continue;
-        if ((other->state() != espbt::ClientState::IDLE && other->get_address() == address) ||
-            other->resting_address_ == address)
+        if (other->state() != espbt::ClientState::IDLE && other->get_address() == address)
             return true;
     }
     return false;
 }
 
-bool EBikeComponent::parse_device(const espbt::ESPBTDevice &device) {
-    if (this->resting_address_ != 0 && device.address_uint64() == this->resting_address_) {
-        this->resting_seen_ms_ = millis();
-        return false;
-    }
+bool TenwaysComponent::parse_device(const espbt::ESPBTDevice &device) {
     if (this->state() != espbt::ClientState::IDLE || !this->matches_(device) ||
         this->claimed_by_other_(device.address_uint64()))
         return false;
@@ -164,7 +145,7 @@ bool EBikeComponent::parse_device(const espbt::ESPBTDevice &device) {
     return true;
 }
 
-void EBikeComponent::set_state(espbt::ClientState state) {
+void TenwaysComponent::set_state(espbt::ClientState state) {
     BLEClientBase::set_state(state);
     if (state == espbt::ClientState::IDLE) {
         this->reset_session_();
@@ -172,16 +153,16 @@ void EBikeComponent::set_state(espbt::ClientState state) {
     this->update_ble_status_();
 }
 
-void EBikeComponent::connect() {
+void TenwaysComponent::connect() {
     this->connect_started_ms_ = millis();
     // Leave the connection parameters to the stack, like the bikes' own apps:
     // forcing short intervals or updating them during setup cost connections.
     // Scanning alongside the setup does too.
-    this->pause_scanning_();
+    bike_scan_v1::pause_unless_needed(this);
     BLEClientBase::connect();
 }
 
-void EBikeComponent::gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param) {
+void TenwaysComponent::gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param) {
     BLEClientBase::gap_event_handler(event, param);
     if (event == ESP_GAP_BLE_UPDATE_CONN_PARAMS_EVT && this->check_addr(param->update_conn_params.bda)) {
         ESP_LOGD(TAG, "Connection params: interval=%.2f ms latency=%u timeout=%u ms (status=%d)",
@@ -190,7 +171,7 @@ void EBikeComponent::gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap
     }
 }
 
-bool EBikeComponent::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if,
+bool TenwaysComponent::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if_t gattc_if,
                                           esp_ble_gattc_cb_param_t *param) {
     if (!BLEClientBase::gattc_event_handler(event, gattc_if, param))
         return false;
@@ -209,7 +190,7 @@ bool EBikeComponent::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if
                 break;
             }
             ESP_LOGD(TAG, "Subscribed, starting handshake");
-            this->pause_scanning_();
+            bike_scan_v1::pause_unless_needed(this);
             this->phase_ = Phase::HANDSHAKE;
             this->handshake_step_ = 0;
             this->next_step_at_ = millis() + SUBSCRIBE_SETTLE_MS;
@@ -249,16 +230,15 @@ bool EBikeComponent::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if
                 break;
             this->last_rx_ms_ = millis();
             const bool km = this->transport_ == Transport::KING_METER;
-            const bool b06 = this->transport_ == Transport::B06;
             auto &stats = this->link_stats_;
             const uint8_t *data = param->notify.value;
             size_t len = param->notify.value_len;
-            if (km || b06) {
+            if (km) {
                 ++stats.notifications;
                 stats.notification_bytes += len;
             }
             this->log_bytes_("RX", param->notify.handle, data, len,
-                             (km || b06) && stats.notifications <= DEBUG_LOGGED);
+                             km && stats.notifications <= DEBUG_LOGGED);
             uint8_t plain[MAX_FRAME_LEN];
             if (is_at_reply(data, len)) {
                 this->handle_at_reply_(data, len);
@@ -283,8 +263,6 @@ bool EBikeComponent::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if
             const uint32_t unhandled_before = stats.unhandled;
             if (km) {
                 changed = this->km_parser_.feed(this->state_, data, len, stats.bad_crc, stats.unhandled);
-            } else if (b06) {
-                changed = this->b06_parser_.feed(this->state_, data, len, stats.bad_crc, stats.unhandled);
             } else {
                 changed = this->parser_.feed(this->state_, data, len, this->bad_crc_count_);
                 if (this->state_.power_w >= 0 && !this->power_seen_) {
@@ -292,8 +270,6 @@ bool EBikeComponent::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if
                     ESP_LOGD(TAG, "Bike reports its power, polling it");
                 }
             }
-            if (b06)
-                this->handle_b06_auth_();
             if (stats.bad_crc != bad_crc_before)
                 ESP_LOGD(TAG, "Frame failed the CRC check (%u this connection)", (unsigned) stats.bad_crc);
             if (stats.unhandled != unhandled_before)
@@ -322,7 +298,7 @@ bool EBikeComponent::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_if
     return true;
 }
 
-void EBikeComponent::on_services_ready_() {
+void TenwaysComponent::on_services_ready_() {
     esp32_ble_client::BLECharacteristic *tx = nullptr;
     esp32_ble_client::BLECharacteristic *rx = nullptr;
     if (this->get_service(NUS_SERVICE_UUID) != nullptr) {
@@ -338,14 +314,6 @@ void EBikeComponent::on_services_ready_() {
                                         (name_len >= 2 && this->bike_name_.compare(name_len - 2, 2, "_D") == 0);
         tx = this->get_characteristic(KM_SERVICE_UUID, KM_NOTIFY_UUID);
         rx = this->get_characteristic(KM_SERVICE_UUID, KM_WRITE_UUID);
-    } else if (this->get_service(B06_SERVICE_UUID) != nullptr) {
-        this->transport_ = Transport::B06;
-        // The B06 reports none of these; drop values restored from another bike.
-        this->state_.remaining_range_km = -1;
-        this->state_.power_w = -1;
-        this->state_.serial_number[0] = '\0';
-        tx = this->get_characteristic(B06_SERVICE_UUID, B06_NOTIFY_UUID);
-        rx = this->get_characteristic(B06_SERVICE_UUID, B06_WRITE_UUID);
     }
     if (tx == nullptr || rx == nullptr) {
         ESP_LOGE(TAG, "No supported bike service found (tx=%s rx=%s)", YESNO(tx != nullptr), YESNO(rx != nullptr));
@@ -355,8 +323,6 @@ void EBikeComponent::on_services_ready_() {
     }
     if (this->transport_ == Transport::KING_METER) {
         ESP_LOGI(TAG, "Using the King Meter protocol (%s layout)", this->km_profile_->name);
-    } else if (this->transport_ == Transport::B06) {
-        ESP_LOGI(TAG, "Using the B06 protocol");
     } else {
         ESP_LOGI(TAG, "Using the Nordic UART protocol (CGO600)");
     }
@@ -370,7 +336,7 @@ void EBikeComponent::on_services_ready_() {
     }
 }
 
-void EBikeComponent::log_bytes_(const char *what, uint16_t handle, const uint8_t *data, size_t len, bool debug) {
+void TenwaysComponent::log_bytes_(const char *what, uint16_t handle, const uint8_t *data, size_t len, bool debug) {
 #if ESPHOME_LOG_LEVEL < ESPHOME_LOG_LEVEL_VERBOSE
     if (!debug)
         return;
@@ -384,15 +350,9 @@ void EBikeComponent::log_bytes_(const char *what, uint16_t handle, const uint8_t
     }
 }
 
-void EBikeComponent::log_km_summary_() {
+void TenwaysComponent::log_km_summary_() {
     this->last_km_summary_ = millis();
     const auto &s = this->link_stats_;
-    if (this->transport_ == Transport::B06) {
-        ESP_LOGI(TAG, "B06: %u requests, %u notifications (%u bytes), %u frames, %u bad CRC, %u unhandled",
-                 (unsigned) s.requests, (unsigned) s.notifications, (unsigned) s.notification_bytes,
-                 (unsigned) this->b06_parser_.frames(), (unsigned) s.bad_crc, (unsigned) s.unhandled);
-        return;
-    }
     ESP_LOGI(TAG,
              "King Meter (%s): %u requests, %u notifications (%u bytes), %u frames, %u bad CRC, %u unhandled, "
              "%u bytes skipped, %u errors, %u undecryptable",
@@ -406,7 +366,7 @@ void EBikeComponent::log_km_summary_() {
 
 // Lists what the bike offers, so a log from an unsupported model shows which
 // service it uses.
-void EBikeComponent::log_services_() {
+void TenwaysComponent::log_services_() {
     char uuid[esp32_ble::UUID_STR_LEN];
     for (auto *service : this->services_) {
         ESP_LOGW(TAG, "  Service %s", service->uuid.to_str(uuid));
@@ -417,16 +377,11 @@ void EBikeComponent::log_services_() {
     }
 }
 
-void EBikeComponent::loop() {
+void TenwaysComponent::loop() {
     BLEClientBase::loop();
 
     const uint32_t now = millis();
     this->flush_tx_(now);
-    if (this->resting_address_ != 0 && now - this->resting_seen_ms_ >= BIKE_GONE_MS) {
-        ESP_LOGI(TAG, "Bike gone, connecting again when it is back");
-        this->resting_address_ = 0;
-        this->update_ble_status_();
-    }
     if (this->phase_ == Phase::HANDSHAKE) {
         this->run_handshake_step_(now);
     } else if (this->phase_ == Phase::POLLING) {
@@ -443,16 +398,6 @@ void EBikeComponent::loop() {
                 this->write_(protocol::BOOTSTRAP_CMD_2);
                 this->write_(protocol::BOOTSTRAP_CMD_3);
             }
-        }
-        if (this->max_connection_ms_ != 0 && this->resting_address_ == 0 && !no_data_yet &&
-            now - this->polling_started_ms_ >= this->max_connection_ms_) {
-            // Keeping the link open keeps some displays from switching off.
-            ESP_LOGI(TAG, "Read the bike for %u s, disconnecting until it leaves",
-                     (unsigned) ((now - this->polling_started_ms_) / 1000));
-            this->resting_address_ = this->get_address();
-            this->resting_seen_ms_ = now;
-            this->disconnect();
-            return;
         }
         const uint32_t quiet_since = std::max(this->polling_started_ms_, this->last_rx_ms_);
         if (now - quiet_since >= (no_data_yet ? FIRST_DATA_TIMEOUT_MS : DATA_TIMEOUT_MS)) {
@@ -473,16 +418,12 @@ void EBikeComponent::loop() {
 }
 
 // Runs from loop() until the display is ready to be polled.
-void EBikeComponent::run_handshake_step_(uint32_t now) {
+void TenwaysComponent::run_handshake_step_(uint32_t now) {
     if (!this->cccd_confirmed_) {
         if ((int32_t) (now - this->cccd_deadline_) < 0)
             return;
         ESP_LOGW(TAG, "Bike did not confirm the notification subscription, continuing");
         this->cccd_confirmed_ = true;
-    }
-    if (this->transport_ == Transport::B06) {
-        this->run_b06_handshake_(now);
-        return;
     }
     if ((int32_t) (now - this->next_step_at_) < 0)
         return;
@@ -497,61 +438,14 @@ void EBikeComponent::run_handshake_step_(uint32_t now) {
     this->finish_handshake_(now);
 }
 
-// Starts the authentication and finishes the handshake once the display has
-// answered it; the challenge itself is answered from handle_b06_auth_().
-void EBikeComponent::run_b06_handshake_(uint32_t now) {
-    namespace b06 = protocol::b06;
-    if (this->handshake_step_ == 0) {
-        if ((int32_t) (now - this->next_step_at_) < 0)
-            return;
-        static const uint8_t START[] = {0x01};
-        uint8_t frame[sizeof(START) + b06::OVERHEAD];
-        if (!this->send_frame_(frame, b06::build_frame(frame, b06::CMD_AUTH_START, START, sizeof(START)))) {
-            ESP_LOGW(TAG, "Authentication request failed, disconnecting");
-            this->disconnect();
-            return;
-        }
-        this->handshake_step_ = 1;
-        this->next_step_at_ = now + B06_AUTH_TIMEOUT_MS;
-        return;
-    }
-    const auto result = this->b06_parser_.auth_result();
-    if (result == b06::FrameParser::AuthResult::NONE && (int32_t) (now - this->next_step_at_) < 0)
-        return;
-    if (result == b06::FrameParser::AuthResult::OK) {
-        ESP_LOGI(TAG, "Display accepted the authentication");
-    } else if (result == b06::FrameParser::AuthResult::FAILED) {
-        ESP_LOGW(TAG, "Display rejected the authentication, listening anyway");
-    } else {
-        ESP_LOGW(TAG, "No answer to the authentication, listening anyway");
-    }
-    this->finish_handshake_(now);
-}
-
-void EBikeComponent::handle_b06_auth_() {
-    uint8_t challenge[protocol::b06::AUTH_CHALLENGE_LEN];
-    if (!this->b06_parser_.take_challenge(challenge))
-        return;
-    uint8_t answer[16];
-    uint8_t frame[sizeof(answer) + protocol::b06::OVERHEAD];
-    if (!protocol::b06_auth_answer(challenge, answer)) {
-        ESP_LOGW(TAG, "Computing the authentication answer failed");
-        return;
-    }
-    ESP_LOGD(TAG, "Answering the authentication challenge");
-    if (!this->send_frame_(frame, protocol::b06::build_frame(frame, protocol::b06::CMD_AUTH_ANSWER, answer,
-                                                             sizeof(answer))))
-        ESP_LOGW(TAG, "Authentication answer failed");
-}
-
 // The CGO600 family members other than the CGO600 itself, which the Tenways
 // app can also run encrypted.
-bool EBikeComponent::is_nus_variant_() const {
+bool TenwaysComponent::is_nus_variant_() const {
     return this->transport_ == Transport::NUS && this->bike_name_.rfind("CGO600", 0) == 0 &&
            this->bike_name_ != "CGO600";
 }
 
-void EBikeComponent::start_encryption_(uint32_t now) {
+void TenwaysComponent::start_encryption_(uint32_t now) {
     namespace km = protocol::km;
     esp_fill_random(this->enc_app_random_, sizeof(this->enc_app_random_));
     uint8_t frame[protocol::HANDSHAKE_VALUE_LEN + 9];
@@ -572,7 +466,7 @@ void EBikeComponent::start_encryption_(uint32_t now) {
 }
 
 // True while the handshake waits for the display; gives up at the deadline.
-bool EBikeComponent::encryption_pending_(uint32_t now) {
+bool TenwaysComponent::encryption_pending_(uint32_t now) {
     if (this->enc_handshake_ != EncHandshake::WAIT_RANDOM && this->enc_handshake_ != EncHandshake::WAIT_IV)
         return false;
     if ((int32_t) (now - this->enc_deadline_) < 0)
@@ -584,7 +478,7 @@ bool EBikeComponent::encryption_pending_(uint32_t now) {
 }
 
 // Consumes the display's handshake replies: its random, then the IV.
-bool EBikeComponent::handle_enc_handshake_reply_(const uint8_t *data, size_t len) {
+bool TenwaysComponent::handle_enc_handshake_reply_(const uint8_t *data, size_t len) {
     namespace km = protocol::km;
     const bool nus = this->transport_ == Transport::NUS;
     if (this->enc_handshake_ == EncHandshake::WAIT_RANDOM) {
@@ -623,7 +517,7 @@ bool EBikeComponent::handle_enc_handshake_reply_(const uint8_t *data, size_t len
     return false;
 }
 
-void EBikeComponent::handle_at_reply_(const uint8_t *data, size_t len) {
+void TenwaysComponent::handle_at_reply_(const uint8_t *data, size_t len) {
     // A display that does not expect the handshake can reject it like this.
     if (this->enc_handshake_ == EncHandshake::WAIT_RANDOM) {
         ESP_LOGI(TAG, "Display rejected the encryption handshake, continuing unencrypted");
@@ -650,7 +544,7 @@ void EBikeComponent::handle_at_reply_(const uint8_t *data, size_t len) {
     }
 }
 
-void EBikeComponent::finish_handshake_(uint32_t now) {
+void TenwaysComponent::finish_handshake_(uint32_t now) {
     this->request_static_fields_();
     this->phase_ = Phase::POLLING;
     this->last_poll_ = now;
@@ -665,23 +559,18 @@ void EBikeComponent::finish_handshake_(uint32_t now) {
     this->update_ble_status_();
 }
 
-bool EBikeComponent::static_fields_missing_() const {
+bool TenwaysComponent::static_fields_missing_() const {
     const auto &s = this->state_;
     return s.serial_number[0] == '\0' || s.firmware[0] == '\0' ||
            (this->transport_ == Transport::NUS && !this->power_seen_);
 }
 
-void EBikeComponent::request_static_fields_() {
+void TenwaysComponent::request_static_fields_() {
     this->last_static_request_ = millis();
     ++this->static_requests_;
     bool ok;
     if (this->transport_ == Transport::KING_METER) {
         ok = this->write_km_read_(this->km_profile_->info_keys, this->km_profile_->info_count);
-    } else if (this->transport_ == Transport::B06) {
-        if (this->state_.firmware[0] != '\0')
-            return;
-        uint8_t frame[protocol::b06::OVERHEAD];
-        ok = this->send_frame_(frame, protocol::b06::build_frame(frame, protocol::b06::CMD_VERSION, nullptr, 0));
     } else {
         // Separate requests, so a bike that does not know one of the fields
         // still answers the others. Not every CGO600 reports its power.
@@ -696,10 +585,7 @@ void EBikeComponent::request_static_fields_() {
         ESP_LOGW(TAG, "Static field request failed");
 }
 
-void EBikeComponent::poll_() {
-    // B06 displays push their data without being asked.
-    if (this->transport_ == Transport::B06)
-        return;
+void TenwaysComponent::poll_() {
     bool ok;
     if (this->transport_ == Transport::KING_METER) {
         // A silent display may expect the encryption handshake, or requests in
@@ -736,21 +622,21 @@ void EBikeComponent::poll_() {
         ESP_LOGW(TAG, "Poll write failed");
 }
 
-bool EBikeComponent::write_nus_read_(const uint8_t *fields, uint8_t count) {
+bool TenwaysComponent::write_nus_read_(const uint8_t *fields, uint8_t count) {
     uint8_t cmd[MAX_WRITE_LEN];
     if (count + 5u > sizeof(cmd))
         return false;
     return this->send_frame_(cmd, protocol::build_request(cmd, fields, count));
 }
 
-bool EBikeComponent::write_km_read_(const uint8_t *keys, uint8_t count) {
+bool TenwaysComponent::write_km_read_(const uint8_t *keys, uint8_t count) {
     uint8_t cmd[MAX_WRITE_LEN];
     if (count + protocol::km::OVERHEAD + 1 > sizeof(cmd))
         return false;
     return this->send_frame_(cmd, protocol::km::build_read(cmd, keys, count, this->km_profile_->crc_low_first));
 }
 
-bool EBikeComponent::send_frame_(const uint8_t *frame, size_t len) {
+bool TenwaysComponent::send_frame_(const uint8_t *frame, size_t len) {
     if (!this->enc_session_.active())
         return this->write_(frame, len, this->enc_write_with_response_ || this->km_write_with_response_);
     uint8_t packet[MAX_WRITE_LEN];
@@ -761,11 +647,11 @@ bool EBikeComponent::send_frame_(const uint8_t *frame, size_t len) {
     return this->write_(packet, packet_len, this->enc_write_with_response_ || this->km_write_with_response_);
 }
 
-bool EBikeComponent::write_(const protocol::Command &cmd) { return this->write_(cmd.data, cmd.len); }
+bool TenwaysComponent::write_(const protocol::Command &cmd) { return this->write_(cmd.data, cmd.len); }
 
 // Queues a frame; flush_tx_() sends it. Returns false when the bike is not
 // connected or the queue is full.
-bool EBikeComponent::write_(const uint8_t *data, size_t len, bool with_response) {
+bool TenwaysComponent::write_(const uint8_t *data, size_t len, bool with_response) {
     if (this->rx_handle_ == 0 || !this->connected() || len > MAX_WRITE_LEN || this->tx_count_ == TX_QUEUE_SIZE)
         return false;
     auto &frame = this->tx_queue_[(this->tx_head_ + this->tx_count_) % TX_QUEUE_SIZE];
@@ -776,7 +662,7 @@ bool EBikeComponent::write_(const uint8_t *data, size_t len, bool with_response)
     return true;
 }
 
-void EBikeComponent::flush_tx_(uint32_t now) {
+void TenwaysComponent::flush_tx_(uint32_t now) {
     if (this->tx_count_ == 0 || now - this->last_tx_ms_ < TX_SPACING_MS)
         return;
     auto &frame = this->tx_queue_[this->tx_head_];
@@ -802,16 +688,13 @@ void EBikeComponent::flush_tx_(uint32_t now) {
     }
 }
 
-bool EBikeComponent::set_light(bool on) {
+bool TenwaysComponent::set_light(bool on) {
     if (this->phase_ != Phase::POLLING) {
         ESP_LOGW(TAG, "Light command ignored: bike not connected");
         return false;
     }
     bool ok;
-    if (this->transport_ == Transport::B06) {
-        uint8_t cmd[4 + protocol::b06::OVERHEAD];
-        ok = this->send_frame_(cmd, protocol::b06::build_light(cmd, on));
-    } else if (this->transport_ == Transport::KING_METER) {
+    if (this->transport_ == Transport::KING_METER) {
         uint8_t cmd[10];
         ok = this->send_frame_(cmd, protocol::km::build_write(cmd, protocol::km::KEY_LIGHT, on ? 1 : 0,
                                                               this->km_profile_->crc_low_first));
@@ -831,32 +714,8 @@ bool EBikeComponent::set_light(bool on) {
     return true;
 }
 
-// Scanning keeps running alongside an established connection by default. With
-// WiFi sharing the radio that costs connection events and the link drops with
-// supervision timeouts, so scan only while some bike is not connected.
-void EBikeComponent::pause_scanning_() {
-    auto *tracker = espbt::global_esp32_ble_tracker;
-    if (tracker == nullptr || scan_paused_)
-        return;
-    for (const auto *other : instances_) {
-        if (other != this && other->phase_ == Phase::IDLE)
-            return;
-    }
-    scan_paused_ = true;
-    tracker->stop_scan();
-}
-
-void EBikeComponent::resume_scanning_() {
-    auto *tracker = espbt::global_esp32_ble_tracker;
-    if (tracker == nullptr || !scan_paused_)
-        return;
-    scan_paused_ = false;
-    // The tracker restarts the scan from its loop once the scanner is idle.
-    tracker->set_scan_continuous(true);
-}
-
-void EBikeComponent::reset_session_() {
-    this->resume_scanning_();
+void TenwaysComponent::reset_session_() {
+    bike_scan_v1::resume();
     if (this->transport_ != Transport::NUS && this->transport_ != Transport::NONE && this->phase_ != Phase::IDLE)
         this->log_km_summary_();
     if (this->phase_ == Phase::POLLING) {
@@ -894,10 +753,9 @@ void EBikeComponent::reset_session_() {
     memset(this->enc_session_key_, 0, sizeof(this->enc_session_key_));
     this->parser_.reset();
     this->km_parser_.reset();
-    this->b06_parser_.reset();
 }
 
-void EBikeComponent::restore_last_state_() {
+void TenwaysComponent::restore_last_state_() {
     this->last_state_pref_ =
         global_preferences->make_preference<LastState>(fnv1_hash("last_state_" + this->storage_key_));
     LastState saved{};
@@ -908,7 +766,7 @@ void EBikeComponent::restore_last_state_() {
     this->publish_state_();
 }
 
-void EBikeComponent::save_last_state_() {
+void TenwaysComponent::save_last_state_() {
     if (!this->last_state_dirty_)
         return;
     LastState data{};
@@ -929,7 +787,7 @@ static void publish_if_changed(sensor::Sensor *sensor, float value) {
         sensor->publish_state(value);
 }
 
-void EBikeComponent::publish_state_() {
+void TenwaysComponent::publish_state_() {
     const auto &s = this->state_;
     publish_if_changed(this->battery_sensor_, s.battery);
     publish_if_changed(this->speed_sensor_, s.speed_kmh);
@@ -960,7 +818,7 @@ void EBikeComponent::publish_state_() {
     }
 }
 
-void EBikeComponent::update_ble_status_() {
+void TenwaysComponent::update_ble_status_() {
     const char *status;
     if (this->phase_ == Phase::POLLING) {
         status = "connected";
@@ -975,7 +833,7 @@ void EBikeComponent::update_ble_status_() {
                 status = "connecting";
                 break;
             default:
-                status = this->resting_address_ != 0 ? "paused" : "searching";
+                status = "searching";
                 break;
         }
     }
@@ -987,7 +845,7 @@ void EBikeComponent::update_ble_status_() {
         this->ble_status_text_sensor_->publish_state(status);
 }
 
-void EBikeLightSwitch::write_state(bool state) {
+void TenwaysLightSwitch::write_state(bool state) {
     // Optimistic: the next poll publishes the bike's actual light state.
     if (this->parent_->set_light(state)) {
         this->publish_state(state);
@@ -996,6 +854,6 @@ void EBikeLightSwitch::write_state(bool state) {
     }
 }
 
-}  // namespace esphome::ebike
+}  // namespace esphome::tenways
 
 #endif  // USE_ESP32

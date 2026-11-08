@@ -9,11 +9,9 @@ CODEOWNERS = ["@stein155"]
 # One block per bike; each takes one BLE connection.
 MULTI_CONF = True
 
-CONF_EBIKE_ID = "ebike_id"
+CONF_TENWAYS_ID = "tenways_id"
 CONF_DEVICE_NAMES = "device_names"
 CONF_POLL_INTERVAL = "poll_interval"
-CONF_MAX_CONNECTION_TIME = "max_connection_time"
-UNLIMITED = "unlimited"
 
 # Matched case-insensitively as substrings of the advertised name, so CGO800
 # also finds "CGO800 PLUS". Plain "AGO" is left out because it also matches
@@ -30,16 +28,15 @@ DEFAULT_DEVICE_NAMES = [
     "AGOT",
     "CARGO",
     "Wayfarer",
-    "B06",
 ]
 
-ebike_ns = cg.esphome_ns.namespace("ebike")
-EBikeComponent = ebike_ns.class_("EBikeComponent", esp32_ble_client.BLEClientBase)
+tenways_ns = cg.esphome_ns.namespace("tenways")
+TenwaysComponent = tenways_ns.class_("TenwaysComponent", esp32_ble_client.BLEClientBase)
 
 CONFIG_SCHEMA = cv.All(
     cv.Schema(
         {
-            cv.GenerateID(): cv.declare_id(EBikeComponent),
+            cv.GenerateID(): cv.declare_id(TenwaysComponent),
             cv.Optional(CONF_DEVICE_NAMES, default=DEFAULT_DEVICE_NAMES): cv.All(
                 cv.ensure_list(cv.string_strict), cv.Length(min=1)
             ),
@@ -47,20 +44,14 @@ CONFIG_SCHEMA = cv.All(
                 cv.positive_time_period_milliseconds,
                 cv.Range(min=cv.TimePeriod(milliseconds=500), max=cv.TimePeriod(seconds=10)),
             ),
-            # Disconnects after reading the bike for this long and reconnects
-            # once it has been away, so the display can switch itself off.
-            cv.Optional(CONF_MAX_CONNECTION_TIME, default=UNLIMITED): cv.Any(
-                cv.one_of(UNLIMITED, lower=True),
-                cv.All(cv.positive_time_period_milliseconds, cv.Range(min=cv.TimePeriod(seconds=5))),
-            ),
         }
     )
     .extend(esp32_ble_tracker.ESP_BLE_DEVICE_SCHEMA)
     .extend(cv.COMPONENT_SCHEMA),
-    esp32_ble.consume_connection_slots(1, "ebike"),
+    esp32_ble.consume_connection_slots(1, "tenways"),
 )
 
-EBIKE_CHILD_SCHEMA = cv.Schema({cv.GenerateID(CONF_EBIKE_ID): cv.use_id(EBikeComponent)})
+TENWAYS_CHILD_SCHEMA = cv.Schema({cv.GenerateID(CONF_TENWAYS_ID): cv.use_id(TenwaysComponent)})
 
 
 async def to_code(config):
@@ -70,5 +61,3 @@ async def to_code(config):
     cg.add(var.set_storage_key(str(config[CONF_ID])))
     cg.add(var.set_device_names(config[CONF_DEVICE_NAMES]))
     cg.add(var.set_poll_interval(config[CONF_POLL_INTERVAL]))
-    if config[CONF_MAX_CONNECTION_TIME] != UNLIMITED:
-        cg.add(var.set_max_connection_time(config[CONF_MAX_CONNECTION_TIME]))

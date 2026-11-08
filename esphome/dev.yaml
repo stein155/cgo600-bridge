@@ -2,8 +2,8 @@
 # credentials from secrets.yaml (copy secrets.yaml.example).
 
 esphome:
-  name: ebike-bridge-dev
-  friendly_name: E-bike Bridge Dev
+  name: tenways-bridge-dev
+  friendly_name: Tenways Bridge Dev
 
 esp32:
   board: esp32dev
@@ -28,7 +28,7 @@ external_components:
   - source:
       type: local
       path: components
-    components: [ebike]
+    components: [tenways]
 
 esp32_ble_tracker:
   scan_parameters:
@@ -49,4 +49,4 @@ packages:
     vars:
       id: bike_2
       name: Bike 2
-      device_name: B06
+      device_name: CGO800

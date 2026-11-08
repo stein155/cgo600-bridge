@@ -5,8 +5,8 @@
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
-src=esphome/components/ebike
-out="${TMPDIR:-/tmp}/ebike-protocol-test"
+src=esphome/components/tenways
+out="${TMPDIR:-/tmp}/tenways-protocol-test"
 
 if [ -z "${MBEDTLS_PREFIX:-}" ] && [ -d /opt/homebrew/opt/mbedtls@3 ]; then
     MBEDTLS_PREFIX=/opt/homebrew/opt/mbedtls@3

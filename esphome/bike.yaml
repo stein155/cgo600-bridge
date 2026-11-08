@@ -15,13 +15,13 @@ esphome:
     - id: ${id}_device
       name: ${name}
 
-ebike:
+tenways:
   - id: ${id}
     device_names: ["${device_name}"]
 
 sensor:
-  - platform: ebike
-    ebike_id: ${id}
+  - platform: tenways
+    tenways_id: ${id}
     battery:
       name: Battery
       device_id: ${id}_device
@@ -51,8 +51,8 @@ sensor:
       device_id: ${id}_device
 
 text_sensor:
-  - platform: ebike
-    ebike_id: ${id}
+  - platform: tenways
+    tenways_id: ${id}
     serial_number:
       name: Serial number
       device_id: ${id}_device
@@ -64,8 +64,8 @@ text_sensor:
       device_id: ${id}_device
 
 switch:
-  - platform: ebike
-    ebike_id: ${id}
+  - platform: tenways
+    tenways_id: ${id}
     light:
       name: Light
       device_id: ${id}_device

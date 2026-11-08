@@ -1,12 +1,12 @@
 # Firmware flashed by the web installer: one bike, found by name.
 #
-# WiFi is set up from the browser (Improv serial) or the "E-bike Bridge"
+# WiFi is set up from the browser (Improv serial) or the "Tenways Bridge"
 # hotspot. Home Assistant then discovers the bridge, and the ESPHome dashboard
 # offers to adopt it (dashboard_import) for further customisation.
 
 substitutions:
-  name: ebike-bridge
-  friendly_name: E-bike Bridge
+  name: tenways-bridge
+  friendly_name: Tenways Bridge
   # Set by the release workflow (esphome -s project_version X.Y.Z compile ...)
   project_version: dev
 
@@ -16,7 +16,7 @@ esphome:
   # Several bridges on one network each get a unique hostname.
   name_add_mac_suffix: true
   project:
-    name: stein155.ebike-bridge
+    name: stein155.tenways-bridge
     version: ${project_version}
 
 esp32:
@@ -33,23 +33,23 @@ ota:
 
 wifi:
   ap:
-    ssid: E-bike Bridge
+    ssid: Tenways Bridge
 
 captive_portal:
 
 improv_serial:
 
 dashboard_import:
-  package_import_url: github://stein155/ebike-bridge/esphome/ebike-bridge.yaml@main
+  package_import_url: github://stein155/tenways-bridge/esphome/tenways-bridge.yaml@main
   import_full_config: true
 
 external_components:
   - source:
       type: git
-      url: https://github.com/stein155/ebike-bridge
+      url: https://github.com/stein155/tenways-bridge
       ref: main
       path: esphome/components
-    components: [ebike]
+    components: [tenways]
 
 esp32_ble_tracker:
   scan_parameters:
@@ -60,10 +60,10 @@ esp32_ble_tracker:
     interval: 320ms
     window: 160ms
 
-ebike:
+tenways:
 
 sensor:
-  - platform: ebike
+  - platform: tenways
     battery:
       name: Battery
     speed:
@@ -84,7 +84,7 @@ sensor:
       name: Power
 
 text_sensor:
-  - platform: ebike
+  - platform: tenways
     serial_number:
       name: Serial number
     firmware_version:
@@ -93,6 +93,6 @@ text_sensor:
       name: BLE status
 
 switch:
-  - platform: ebike
+  - platform: tenways
     light:
       name: Light
