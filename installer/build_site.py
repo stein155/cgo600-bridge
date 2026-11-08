@@ -18,7 +18,7 @@ import os
 import shutil
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-ESPHOME_BUILD = os.path.join(ROOT, "esphome", ".esphome", "build", "tenways-bridge", ".pioenvs", "tenways-bridge")
+ESPHOME_BUILD = os.path.join(ROOT, "esphome", ".esphome", "build", "tenways-bridge", "build")
 
 
 def _copy(src, dest):

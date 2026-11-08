@@ -50,7 +50,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          BUILD=esphome/.esphome/build/tenways-bridge/.pioenvs/tenways-bridge
+          BUILD=esphome/.esphome/build/tenways-bridge/build
           cp "$BUILD/firmware.factory.bin" tenways-bridge-factory.bin
           cp "$BUILD/firmware.ota.bin" tenways-bridge-ota.bin
           sha256sum tenways-bridge-*.bin > SHA256SUMS
