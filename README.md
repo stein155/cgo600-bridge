@@ -1,7 +1,7 @@
 <p align="center">
   <picture>
     <source media="(prefers-color-scheme: dark)" srcset="docs/assets/hero-dark.svg">
-    <img src="docs/assets/hero-light.svg" alt="Tenways Bridge. Your e-bike. Now in Home Assistant. Battery, odometer and every ride, without reaching for your phone. A Tenways bike, an ESP32 and Home Assistant in a row.">
+    <img src="docs/assets/hero-light.svg" alt="Tenways Bridge. Your e-bike. Now in Home Assistant. Battery, odometer and your rides, without reaching for your phone. A Tenways bike, an ESP32 and Home Assistant in a row.">
   </picture>
 </p>
 
@@ -27,7 +27,7 @@ A Tenways bike only talks to its app, and only while your phone is next to it.
 
 **Tenways Bridge listens all the time.** It is a small ESP32 near where the bike is parked. Switch the bike
 on and the bridge connects by itself, with no pairing and no MAC address. Home Assistant gets the battery,
-the odometer, the trip and the light, and every ride ends up in a calendar.
+the odometer, the trip and the light, and the included blueprint logs your rides in a calendar.
 
 > [!NOTE]
 > Unofficial community project, not affiliated with or endorsed by Tenways. Use at your own risk.
@@ -36,8 +36,9 @@ the odometer, the trip and the light, and every ride ends up in a calendar.
 
 - **🔋 Know before you go.** The last known charge stays in Home Assistant after the bike
   is switched off, and after the bridge restarts.
-- **🗓️ Every ride. Automatically.** Distance, duration, average speed and battery use land in a Home
-  Assistant calendar, worked out from the odometer, so a ride counts even when the bridge missed the arrival.
+- **🗓️ Your rides, logged.** Set up the ride blueprint once, and distance, duration, average speed and
+  battery use land in a Home Assistant calendar. It works from the odometer, so the distance counts even
+  when the bridge missed the arrival.
 - **🏠 Always home.** The bridge is always there, so the bike reports in whenever it is switched
   on at home, whoever rides it and wherever your phone is.
 - **🚲 One bridge. Every bike.** Up to three bikes on one ESP32, each as its own Home Assistant device.
@@ -64,7 +65,7 @@ same ESP32.
 | ⚡ **Power** | Motor power, on displays that report it. |
 | 💡 **Light** | A switch that turns the bike's light on and off. |
 | 🏷️ **Diagnostics** | Serial number, firmware version and the BLE status (`searching`, `connecting`, `handshake`, `connected`). |
-| 🗓️ **Rides** | A [blueprint](homeassistant/blueprints/automation/tenways_rides.yaml) that writes every ride to a calendar. |
+| 🗓️ **Rides** | A [blueprint](homeassistant/blueprints/automation/tenways_rides.yaml) that writes your rides to a calendar. |
 
 ## Supported bikes
 
@@ -186,7 +187,7 @@ is being set up.
 | `text_sensor` | `serial_number`, `firmware_version`, `ble_status` | |
 | `switch` | `light` | |
 
-**Rides.** The [ride blueprint](homeassistant/blueprints/automation/tenways_rides.yaml) logs every ride of a bike
+**Rides.** The [ride blueprint](homeassistant/blueprints/automation/tenways_rides.yaml) logs the rides of a bike
 as an event in a calendar, such as a [local calendar](https://www.home-assistant.io/integrations/local_calendar/),
 which keeps it permanently. It works from the odometer, not from the trip counters: a ride is counted even when the
 bridge missed the arrival, and rides between two sightings of the bike count as one. Each ride has its start and

@@ -4,7 +4,7 @@
 <text x="640" y="112" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="24" font-weight="600" fill="#a1a1a6" letter-spacing="0.2">Tenways Bridge</text>
 <text x="640" y="212" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="92" font-weight="700" fill="#f5f5f7" letter-spacing="-3.5">Your e-bike.</text>
 <text x="640" y="312" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="92" font-weight="700" fill="url(#g)" letter-spacing="-3.5">Now in Home Assistant.</text>
-<text x="640" y="374" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="27" fill="#a1a1a6" letter-spacing="-0.2">Battery, odometer and every ride. Without reaching for your phone.</text>
+<text x="640" y="374" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="27" fill="#a1a1a6" letter-spacing="-0.2">Battery, odometer and your rides. Without reaching for your phone.</text>
 <path d="M478 482 H602" stroke="#48484a" stroke-width="2.4" stroke-dasharray="1 9" stroke-linecap="round"/>
 <path d="M678 482 H822" stroke="#48484a" stroke-width="2.4" stroke-dasharray="1 9" stroke-linecap="round"/>
 <g transform="translate(420,480) scale(1.25)"><g fill="none" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" stroke="#f5f5f7"><circle cx="-22" cy="10" r="15"/><circle cx="24" cy="10" r="15"/>
