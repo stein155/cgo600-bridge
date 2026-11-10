@@ -1,272 +1,271 @@
-# CGO600 Smart Bridge
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/hero-dark.svg">
+    <img src="docs/assets/hero-light.svg" alt="Tenways Bridge. Your e-bike. Now in Home Assistant. Battery, odometer and your rides, without reaching for your phone. A Tenways bike, an ESP32 and Home Assistant in a row.">
+  </picture>
+</p>
 
-ESP32 firmware, built on [ESPHome](https://esphome.io), that reads live telemetry from a **Tenways CGO600** e-bike over Bluetooth Low Energy and brings it into **Home Assistant**. The bridge also serves its own multilingual web dashboard (installable as a PWA) for live monitoring, light control and a ride history. Once installed, no computer is needed.
+<p align="center">
+  <a href="https://github.com/stein155/tenways-bridge/actions/workflows/esphome.yml"><img alt="CI" src="https://github.com/stein155/tenways-bridge/actions/workflows/esphome.yml/badge.svg?branch=main"></a>
+  <img alt="ESPHome 2026.10" src="https://img.shields.io/badge/ESPHome-2026.10-111111?logo=esphome&logoColor=white">
+  <img alt="ESP32" src="https://img.shields.io/badge/ESP32-ESP--IDF-111111?logo=espressif&logoColor=white">
+  <a href="LICENSE"><img alt="License: MIT" src="https://img.shields.io/badge/license-MIT-111111"></a>
+</p>
 
-> "TENWAYS" and "CGO600" are trademarks of TENWAYS. This is an unofficial community project, not affiliated with or endorsed by TENWAYS — use at your own risk.
+<p align="center">
+  <a href="https://stein155.github.io/tenways-bridge/"><b>Web installer</b></a> ·
+  <a href="#getting-started"><b>Getting started</b></a> ·
+  <a href="#how-it-works"><b>How it works</b></a> ·
+  <a href="#troubleshooting"><b>Troubleshooting</b></a> ·
+  <a href="docs/protocols.md"><b>Protocols</b></a> ·
+  <a href="CONTRIBUTING.md"><b>Contribute</b></a>
+</p>
+
+---
+
+A Tenways bike only talks to its app, and only while your phone is next to it.
+
+**Tenways Bridge listens all the time.** It is a small ESP32 near where the bike is parked. Switch the bike
+on and the bridge connects by itself, with no pairing and no MAC address. Home Assistant gets the battery,
+the odometer, the trip and the light, and the included blueprint logs your rides in a calendar.
+
+> [!NOTE]
+> Unofficial community project, not affiliated with or endorsed by Tenways. Use at your own risk.
+
+## Why Tenways Bridge
+
+- **🔋 Know before you go.** The last known charge stays in Home Assistant after the bike
+  is switched off, and after the bridge restarts.
+- **🗓️ Your rides, logged.** Set up the ride blueprint once, and distance, duration, average speed and
+  battery use land in a Home Assistant calendar. It works from the odometer, so the distance counts even
+  when the bridge missed the arrival.
+- **🏠 Always home.** The bridge is always there, so the bike reports in whenever it is switched
+  on at home, whoever rides it and wherever your phone is.
+- **🚲 One bridge. Every bike.** Up to three bikes on one ESP32, each as its own Home Assistant device.
+
+## The story
+
+I own a Tenways CGO600 and run a smart home built around Home Assistant. I like to integrate as many devices
+as possible into Home Assistant, including devices that do not expose a ready-made integration.
+
+For this project I reverse engineered the bike's Bluetooth protocol and built an ESP32 bridge for it. In my
+setup the ESP32 is mounted in the shed where the bike is parked. When the bike connects on departure or
+arrival, the bridge reads the latest data and reports it to Home Assistant. The cargo bike next to it has a
+different display, which became [B06 Bridge](https://github.com/stein155/b06-bridge); both bikes share the
+same ESP32.
+
+## What you get
+
+| | |
+| --- | --- |
+| 🔋 **Battery** | Charge in percent, kept after the bike switches off. |
+| 🛣️ **Odometer** | Total distance, as a `total_increasing` sensor for long-term statistics. |
+| ⏱️ **Trip** | Speed, maximum and average speed, trip distance and trip duration. |
+| 📏 **Range** | Remaining range, on displays that report it. |
+| ⚡ **Power** | Motor power, on displays that report it. |
+| 💡 **Light** | A switch that turns the bike's light on and off. |
+| 🏷️ **Diagnostics** | Serial number, firmware version and the BLE status (`searching`, `connecting`, `handshake`, `connected`). |
+| 🗓️ **Rides** | A [blueprint](homeassistant/blueprints/automation/tenways_rides.yaml) that writes your rides to a calendar. |
 
 ## Supported bikes
 
-| Bike | Status |
-|---|---|
-| CGO600 | **Supported** |
-| CGO600 Pro, CGO600 PLUS, CGO600 Pro-C, CGO600 Pro_T | **Experimental**, untested |
-| CGO800S, CGO800 Plus | **Experimental**: connects, data not confirmed yet |
-| CGO009, CGO009L, CGO009_D | **Experimental**, untested |
-| Longtail Duo, Longtail Duo_D | **Experimental**, untested |
-| AGO AIR, AGO AIR-BELT_D, Wayfarer_B, CGO600_D | **Experimental**, untested |
-| AGO, AGOX, AGOT, CARGO, CGO COMPACT_D, CGO001 | **Experimental**, untested |
+| Display | Status |
+| --- | --- |
+| **Tenways CGO600** | ✅ Tested |
+| Tenways CGO600 Pro, PLUS, Pro-C, Pro_T | 🧪 Experimental |
+| Tenways CGO800S, CGO800 Plus | 🧪 Experimental: connects, data unconfirmed |
+| Tenways CGO009, Longtail Duo, AGO AIR, Wayfarer_B, CGO600_D, AGO, AGOX, AGOT, CARGO, CGO COMPACT_D, CGO001 | 🧪 Experimental |
 
-Only the CGO600 is supported. The other bikes are detected automatically and get the requests the Tenways app uses for them, including its encrypted mode, but reading data and light control have not been confirmed on any of them yet. Logs from such a bike are very welcome in [issue #2](https://github.com/stein155/cgo600-bridge/issues/2).
+Experimental displays get the requests the Tenways app uses, but have not been confirmed on a real bike.
+Logs from your bike are welcome in [issue #2](https://github.com/stein155/tenways-bridge/issues/2).
 
-## Motivation
+## What you need
 
-I own a Tenways CGO600 and run a smart home built around Home Assistant. I like to integrate as many devices as possible into Home Assistant, including devices that do not expose a ready-made integration.
+- An **ESP32** board with Bluetooth, such as an ESP32 DevKit (`esp32dev`), and a USB cable and charger for it.
+  No wiring and nothing on the bike: the bridge only listens over Bluetooth.
+- A spot for it within Bluetooth range of where the bike is parked, and in reach of your WiFi.
+- [Home Assistant](https://www.home-assistant.io) with the ESPHome integration.
 
-For this project I reverse engineered the bike's Bluetooth protocol and built an ESP32 bridge for it. In my setup the ESP32 is mounted in the shed where the bike is parked. When the bike connects on departure or arrival, the bridge reads the latest data and reports it to Home Assistant.
+## Getting started
 
-## Screenshots
+1. **Flash** an ESP32 from the browser with the [web installer](https://stein155.github.io/tenways-bridge/).
+   Chrome or Edge, a USB cable, done.
+2. **Connect** it to your WiFi when the installer asks. Skipped that? Join the *Tenways Bridge* hotspot and
+   pick your network there.
+3. **Add** the bridge in Home Assistant under *Settings → Devices & services*; it is discovered by itself.
+4. **Switch the bike on** near the bridge. The BLE status goes to `connected` and the entities fill in.
 
-| Dashboard | Rides | Configuration |
-|---|---|---|
-| ![Dashboard](docs/dashboard.jpeg) | ![Rides](docs/rides.jpeg) | ![Config](docs/config.jpeg) |
+Place the ESP32 near where the bike is parked. The installed firmware handles one bike
+and finds it by name.
 
-## Features
-
-- **Home Assistant entities** through the native ESPHome API, discovered automatically
-- **Web dashboard** on the bridge: battery, range, light, lifetime totals and ride history
-- **Ride history** inferred from check-ins, stored on the ESP32 and sent to Home Assistant as events
-- **Light control** from Home Assistant and the dashboard
-- **No pairing**: the bike is found by name or by its Bluetooth service, no MAC address needed
-
-## Installation
-
-### Install from the browser
-
-Open the **[web installer](https://stein155.github.io/cgo600-bridge/)** in Chrome or Edge on a desktop computer, connect the ESP32 over USB and click *Install*.
-
-1. After flashing, enter your WiFi details in the installer. If you skip this, connect to the *CGO600 Bridge* hotspot instead.
-2. Click *Visit device* to open the dashboard and bookmark it. The address (IP and `.local` name) is also shown under *Settings → System*.
-3. Add the bridge in Home Assistant under *Settings → Devices & services*; it is usually discovered automatically.
-4. Switch the bike on near the bridge; it connects by itself.
-
-Updates are installed over WiFi from the ESPHome dashboard. In the ESPHome add-on, *Adopt* the bridge to customise its configuration.
-
-### Add to your own ESPHome configuration
-
-The `cgo` component can be added to any ESP32 configuration that uses the `esp-idf` framework:
+### Build it yourself
 
 ```yaml
 external_components:
   - source:
       type: git
-      url: https://github.com/stein155/cgo600-bridge
+      url: https://github.com/stein155/tenways-bridge
       path: esphome/components
-    components: [cgo]
+    components: [tenways]
 
-time:
-  - platform: sntp   # wall-clock time for the ride history
-
-esp32_ble_tracker:
-  scan_parameters:
-    active: true
-    continuous: true
-    interval: 320ms
-    window: 160ms
-
-cgo:
-  device_names: [CGO600]          # part of the advertised name, any case (default: every Tenways model)
-  poll_interval: 1s               # 500ms to 10s (default: 1s)
-  max_rides: 50                   # rides kept on the device, 1 to 50 (default: 20)
-
-sensor:
-  - platform: cgo
-    battery:
-      name: Battery
-    range:
-      name: Total range
-
-switch:
-  - platform: cgo
-    light:
-      name: Light
+tenways:
 ```
 
-[`esphome/cgo600-install.yaml`](esphome/cgo600-install.yaml) is the complete configuration the web installer flashes, and [`esphome/cgo600.yaml`](esphome/cgo600.yaml) is a development example. Copy `esphome/secrets.yaml.example` to `esphome/secrets.yaml` to compile it locally.
+[`esphome/tenways-bridge.yaml`](esphome/tenways-bridge.yaml) is the complete configuration with all entities.
+
+## How it works
+
+```mermaid
+flowchart LR
+  bike["🚲 Tenways display<br/>Nordic UART or King Meter"]
+  subgraph esp["ESP32 · ESPHome"]
+    t["<b>tenways</b> component<br/>discovery · handshake · polling"]
+  end
+  ha["🏠 Home Assistant<br/>entities · ride calendar"]
+  bike -- Bluetooth LE --> t
+  t -- ESPHome API --> ha
+```
+
+- **Discovery without pairing.** The bridge connects to the first bike whose Bluetooth name matches. A bike
+  it found that way is also recognised when it later advertises its Tenways service without a name.
+- **Two transports.** The CGO600 family speaks Nordic UART; newer displays such as the CGO800 speak the King
+  Meter protocol, with a model profile picked from the bike's name. Displays that need it get the encrypted
+  session of the Tenways app. The [protocol reference](docs/protocols.md) has the details.
+- **Built for short visits.** A bike is often in range for only a few seconds when you leave or come home.
+  The bridge scans at its full window as long as any bike is still searching. Scanning stops only while a
+  bike is being set up, from connecting until its first poll, because a scan next to it costs the connection,
+  and once every bike is connected, so WiFi and Bluetooth share the radio well.
+
+## Multiple bikes
+
+Every bike gets its own `tenways` block and takes one of the ESP32's three BLE connections. Include
+[`esphome/bike.yaml`](esphome/bike.yaml) once per bike to add it as a separate device in Home Assistant:
+
+```yaml
+packages:
+  bike_1: !include
+    file: bike.yaml
+    vars:
+      id: bike_1           # unique; also keys the bike's state in flash
+      name: Bike 1         # device name in Home Assistant
+      device_name: CGO600  # part of the bike's Bluetooth name
+  bike_2: !include
+    file: bike.yaml
+    vars:
+      id: bike_2
+      name: Bike 2
+      device_name: CGO800
+```
+
+A block only connects to a bike no other block holds.
+
+## The bike bridges
+
+Tenways Bridge is one of a family of ESPHome components that each speak one make of e-bike display, built
+to share a single ESP32:
+
+| Project | Bikes | |
+| --- | --- | --- |
+| **Tenways Bridge** (this repository) | Tenways CGO600, CGO800 and the other displays listed above | battery, odometer, trip, range, power, light, rides |
+| [**B06 Bridge**](https://github.com/stein155/b06-bridge) | B06 displays of the BIKEGO plus app, such as on Bafang conversions | battery, odometer, trip, light |
+
+A household with both kinds of bike needs one bridge, not two: add both `external_components` entries and
+both blocks to the same configuration. The components ship the same `scan_coordinator.h`, through which they
+share the radio: scanning keeps running until the bikes of both are connected, and stops while any of them
+is being set up.
 
 ## Home Assistant
 
 | Platform | Key | Unit |
-|---|---|---|
+| --- | --- | --- |
 | `sensor` | `battery` | % |
 | `sensor` | `speed`, `max_speed`, `avg_speed` | km/h |
-| `sensor` | `trip_distance`, `remaining_range`, `range` | km |
+| `sensor` | `trip_distance`, `remaining_range` | km |
+| `sensor` | `odometer` | km (total increasing) |
 | `sensor` | `trip_duration` | s |
 | `sensor` | `power` | W |
-| `text_sensor` | `serial_number`, `firmware_version`, `ble_status` | — |
-| `switch` | `light` | — |
+| `text_sensor` | `serial_number`, `firmware_version`, `ble_status` | |
+| `switch` | `light` | |
 
-All keys are optional. `range` is the bike's total odometer. `power` and `firmware_version` stay empty on bikes that do not report them; the bridge asks for the power until the bike answers once, then polls it with the other telemetry.
+**Rides.** The [ride blueprint](homeassistant/blueprints/automation/tenways_rides.yaml) logs the rides of a bike
+as an event in a calendar, such as a [local calendar](https://www.home-assistant.io/integrations/local_calendar/),
+which keeps it permanently. It works from the odometer, not from the trip counters: a ride is counted even when the
+bridge missed the arrival, and rides between two sightings of the bike count as one. Each ride has its start and
+end, distance, duration, average speed and battery use; it also fires the `tenways_ride` event and can update a
+text helper with the last ride. Per bike, create a text helper (maximum length 255) for the blueprint's state,
+create an automation from the blueprint, and run it once. A calendar card in list view shows the rides.
 
-Every inferred ride fires the `on_ride` trigger with `distance_km`, `duration_s` and `battery_used`. The ready-made configuration forwards it as a Home Assistant event, which you can use in automations:
+**Distance per period.** The odometer is a `total_increasing` sensor, so Home Assistant keeps long-term
+statistics for it. A bike can restart its odometer by itself; Home Assistant and the ride blueprint treat the
+lower value as a new meter reading and count on from there. A statistics graph card shows the distance per day, week or month:
 
 ```yaml
-cgo:
-  on_ride:
-    - homeassistant.event:
-        event: esphome.cgo_ride
-        data:
-          distance_km: !lambda 'return str_sprintf("%.1f", distance_km);'
+type: statistics-graph
+entities: [sensor.bike_1_odometer]
+stat_types: [change]
+period: week
+chart_type: bar
 ```
 
-(`api: homeassistant_services: true` is required for `homeassistant.event`.)
+## Troubleshooting
 
-## Web dashboard
+| BLE status | What it means | What to try |
+| --- | --- | --- |
+| stays `searching` | The bridge does not see the bike. | Switch the bike on near the bridge. Close the Tenways app: a display accepts one connection. Check that the bike's Bluetooth name contains one of `device_names`. |
+| `connecting` or `handshake`, then back to `searching` | The bike is seen, but the connection does not hold. | Move the ESP32 closer to the bike, and away from metal and other 2.4 GHz devices. |
+| `connected`, but entities stay empty | The display does not answer the requests. | Likely an experimental display; share the logs in [issue #2](https://github.com/stein155/tenways-bridge/issues/2). |
 
-The dashboard is embedded in the firmware and served at the bridge's address. The bridge settings come from the ESPHome configuration, so the dashboard shows them read-only. It keeps the display preferences, the ride history and a restart button. Because the dashboard serves `/`, it cannot be combined with ESPHome's own `web_server` component; set `web_ui: false` to use that instead.
+The logs tell the rest: `esphome logs <config> --device <bridge-ip>`, the ESPHome dashboard, or USB serial at
+115200 baud. [SUPPORT.md](SUPPORT.md) lists what to include in a bug report.
 
-The dashboard talks to a small JSON API:
+## Upgrading from cgo600-bridge
 
-| Method | Path | Purpose |
-|---|---|---|
-| GET | `/api/state` | Live telemetry and connection status |
-| GET | `/api/config` | Configuration, address and firmware version |
-| GET | `/api/rides` | Stored rides |
-| POST | `/api/light?on=0\|1` | Switch the light |
-| POST | `/api/rides/clear` | Delete all rides |
-| POST | `/api/rides/import?start=…&end=…&distance=…&duration=…` | Import one ride (epoch seconds, km, s) |
-| POST | `/api/restart` | Restart the bridge |
+Version 2 is a breaking release:
 
-## Ride history
+- The component is now `tenways` (was `cgo`); `cgo_id` is now `tenways_id`.
+- `range` is now `odometer`. `web_ui`, `max_rides`, `on_ride` and the `esphome.cgo_ride` event are gone,
+  together with the dashboard, the JSON API and the ride history on the bridge. Rides are derived in Home
+  Assistant instead.
+- The hostname changes from `cgo600-bridge-xxxxxx` to `tenways-bridge-xxxxxx`. Home Assistant keeps the device
+  and its entity IDs; the bikes of the `bike.yaml` package appear as separate devices.
+- WiFi credentials set through the installer or the hotspot are kept. A bridge whose credentials were
+  compiled into its old firmware falls back to the *Tenways Bridge* hotspot after the update.
 
-The bridge only sees the bike when it connects, typically on departure or arrival, so it infers rides from the time and counter difference between two check-ins. Each ride records its window, distance, duration, battery delta and average/max speed. Rides are stored in the ESP32's flash and survive updates.
+## For developers
 
-## Bluetooth notes
+| Where | What |
+| --- | --- |
+| [`esphome/components/tenways/`](esphome/components/tenways) | the component: BLE client, the two protocols, the encrypted session (C++) and its ESPHome schema (Python) |
+| [`esphome/`](esphome) | the configuration the installer flashes, the per-bike package and the development configuration |
+| [`homeassistant/blueprints/`](homeassistant/blueprints) | the ride blueprint |
+| [`installer/`](installer) | the web installer page and the scripts that publish it |
+| [`tests/`](tests) | host tests of the protocol code: frames, parsing, encryption |
+| [`docs/`](docs) | the [protocol reference](docs/protocols.md) |
 
-The component uses one BLE connection slot, which counts towards `esp32_ble: max_connections`. While the bike is connected, it pauses scanning and requests a relaxed connection interval with a 10 s supervision timeout, because scanning during the connection caused regular disconnects.
+You do not need a bike to work on the protocol code; the host tests run on any machine with a C++17 compiler
+and mbedtls:
 
-## Upgrading to the `cgo` component name
-
-The component was renamed from `cgo600` to `cgo` now that it also supports the CGO800. This is a breaking change for existing installations:
-
-1. Before updating, save your rides: open `http://<bridge>/api/rides` and save the JSON. The ride history is stored under a new key and starts empty after the update.
-2. In your ESPHome configuration, replace `components: [cgo600]` with `components: [cgo]`, the `cgo600:` block with `cgo:`, and every `platform: cgo600` with `platform: cgo`. Configurations still using `cgo600` no longer compile.
-3. Update Home Assistant automations that listen for `esphome.cgo600_ride` to `esphome.cgo_ride`, and the `event:` in your `on_ride` action.
-4. After updating, import the saved rides under *Settings → Ride history → Import rides*. The dashboard's language and theme are reset once.
-
-## Migrating from the standalone firmware
-
-Earlier versions were standalone PlatformIO firmware with MQTT; the last release of it is still available on the releases page. To move over:
-
-1. Save your rides from the old dashboard: open `http://<bridge>/api/rides` and save the JSON.
-2. Install with the web installer over USB. Alternatively, flash `cgo600-bridge-ota.bin` from the release over WiFi with the old firmware's OTA (`espota.py -i <bridge-ip> -f cgo600-bridge-ota.bin`).
-3. In the new dashboard, go to *Settings → Ride history → Import rides* and select the saved file.
-4. Remove the old MQTT entities from Home Assistant.
-
-## BLE protocol
-
-The CGO600 exposes a Nordic UART Service (NUS) over BLE. Commands are written to the RX characteristic; telemetry replies arrive as notifications on the TX characteristic. The protocol details below come from reverse engineering and may differ across bike/display firmware versions.
-
-### Frame format
-
-```
-Read  0x52 [len] [field_ids...] [CRC16_lo] [CRC16_hi] 0x45
-Write 0x57 [len] [payload...]   [CRC16_lo] [CRC16_hi] 0x45
+```bash
+tests/run.sh                          # host tests of the protocol code
+./lint.sh                             # clang-format, ruff, yamllint, shellcheck (requirements-lint.txt)
+esphome compile esphome/dev.yaml      # two bikes; copy esphome/secrets.yaml.example first
+esphome logs esphome/dev.yaml --device <bridge-ip>
 ```
 
-The checksum is CRC-16/MODBUS (polynomial `0xA001` reflected, initial value `0xFFFF`), computed over all bytes from the start byte up to the CRC. Requests carry it low byte first; frames from the bike carry it high byte first.
+CI runs the linters and the host tests, and compiles `esphome/dev.yaml` and the installer configuration.
+Only the protocol code has automated tests; everything else is verified on a real bike. Start with
+[CONTRIBUTING.md](CONTRIBUTING.md); releases follow [RELEASE.md](RELEASE.md).
 
-### Field IDs
+## Thanks
 
-| ID | Field | Decoding |
-|---|---|---|
-| `0x07` | Serial number | ASCII string |
-| `0x11` | Speed | uint16 BE ÷ 10 → km/h |
-| `0x12` | Max speed | uint16 BE ÷ 10 → km/h |
-| `0x13` | Average speed | uint16 BE ÷ 10 → km/h |
-| `0x14` | Trip distance | uint16 BE ÷ 10 → km |
-| `0x15` | Trip duration | uint16 BE → seconds |
-| `0x16` | Remaining range | uint16 BE ÷ 10 → km (`0xFFFF` = unknown) |
-| `0x17` | Total range (odometer) | uint16 BE ÷ 10 → km |
-| `0x1A` | Battery | uint8 → % |
-| `0x21` | Light | uint8 (0 = off, 1 = on) |
+Tenways Bridge is built on [ESPHome](https://esphome.io) and [Home Assistant](https://www.home-assistant.io),
+and the installer on [ESP Web Tools](https://esphome.github.io/esp-web-tools/). The King Meter framing of the
+Longtail Duo was first documented by [tenways-ble](https://github.com/Styx85/tenways-ble).
 
-### King Meter (CGO800 and others)
+## Legal
 
-Newer displays expose a King Meter service (`43480001-f001-4b49-4e47-204d45544552`) instead of NUS. Requests are written to `43480002-…`; replies arrive as notifications on `43480003-…`. The bridge has a profile for each driver in the Tenways app and follows how the app talks to each model; the Longtail Duo layout was first captured by [tenways-ble](https://github.com/Styx85/tenways-ble).
+Tenways Bridge is licensed under the [MIT License](LICENSE).
 
-```
-[type] 0x00 [len] [count] [payload...] [CRC16] [CRC16] 0x45
-```
-
-`type` is `0x62` (read) or `0x63` (write), `len` counts `count` and the payload, and `count` is the number of keys. A read request lists keys; the reply carries `[key] [size] [value]` entries with big-endian values. A write carries one `[key] [size] [value]` entry. The checksum is the same CRC-16/MODBUS. The CGO800 sends it low byte first, every other King Meter model high byte first, and a display ignores requests in the wrong order.
-
-| Profile | Models (advertised name starts with) | Info keys | Status keys |
-|---|---|---|---|
-| CGO800 | `CGO800` | `04 05` | `05 06 07 08 09 0A 0B 0C 0F 11 23` |
-| CGO009 | `CGO009` | `04 05 70 4F 50` | `06 07 08 09 11 12 0A 0B 0C 0F 23 4F 50` |
-| Longtail Duo | `Longtail Duo` | `04 05 4F 70` | `06 07 08 09 11 0A 0B 0C 0F 23 4F` |
-| AGO AIR | `AGO AIR`, `Wayfarer_B`, `CGO600_D` | `04 05 4F 76` | as Longtail Duo |
-| AGO | anything else, and bikes without a name | `04 05` | `05 06 07 08 09 11 0A 0B 0C 0F 23` |
-
-AGO AIR models and every model whose name ends in `_D` are written with response, like the app does. When a bike does not answer, the bridge first tries the encryption handshake and then the other CRC order.
-
-| Key | Field | Decoding |
-|---|---|---|
-| `0x04` | Firmware version | dotted bytes (`01 02 03` = 1.2.3); CGO800: ASCII |
-| `0x05` | Serial number | ASCII string |
-| `0x06` | Speed | uint16 ÷ 10 → km/h |
-| `0x07` | Max speed | uint16 ÷ 10 → km/h |
-| `0x08` | Average speed | uint16 ÷ 10 → km/h |
-| `0x09` | Trip distance | uint32 ÷ 10 → km |
-| `0x0A` | Ride time | uint32 → seconds |
-| `0x0B` | Remaining range | uint16 → km; 655 or 32767 = none (CGO800: any byte ≥ `0x80` = none) |
-| `0x0C` | Total range (odometer) | uint32 ÷ 10 → km (CGO800: whole km) |
-| `0x0F` | Battery | uint8 → % |
-| `0x11` | Light | uint8 (0 = off, 1 = on); written to switch the light |
-| `0x23` | Power | uint16 → W (above 3000 ignored) |
-
-#### Encryption
-
-Some displays (seen on the CGO800 Plus) answer plain requests only with an `AT+NAME=…` error and expect an encrypted session first. The bridge tries this handshake first on CGO800 bikes, and on other bikes when they do not answer or report such an error; it continues unencrypted when the display does not reply to it:
-
-1. The bridge writes 16 random bytes under key `0xD8`; the display replies with its own 16 random bytes under the same key.
-2. Both sides derive a 32-byte AES key with HKDF-SHA256: the bridge's random is the salt, a fixed secret from the Tenways app the input key, and the display's random the info.
-3. The bridge reads key `0xD2`, the 16-byte IV.
-4. From then on every frame is sent and received as an AES-256-CBC packet (PKCS#7 padding, the same IV for every packet):
-
-```
-0xA5 [0x80 | len_hi] [len_lo] [seq_hi] [seq_lo] [ciphertext] [CRC16_hi] [CRC16_lo] 0x5A
-```
-
-`len` is the ciphertext length, `seq` counts packets from 1 and the CRC is CRC-16/MODBUS over `0xA5` up to the ciphertext. Writes to an encrypted display use write with response.
-
-A notification that starts with `AT+` is an error report from the display. Like the Tenways app, the bridge reconnects after the second one.
-
-The first 20 requests and notifications of every King Meter connection are logged at DEBUG, and a summary of the traffic (requests, notifications, frames, CRC errors, skipped bytes, errors) every 30 s. Add `logger: logs: cgo: VERBOSE` to log every raw notification.
-
-## Repository layout
-
-```
-esphome/
-  cgo600-install.yaml       Ready-made configuration flashed by the web installer
-  cgo600.yaml               Development example configuration
-  components/cgo/
-    __init__.py             Configuration schema and code generation
-    cgo.h/.cpp              BLE client: discovery, handshake, polling, entities
-    cgo_protocol.h/.cpp     Frames, CRC and field decoding
-    ride_log.h/.cpp         Ride inference and flash storage
-    web_ui.h/.cpp           Dashboard and JSON API on the ESPHome web server
-    web_assets.py           Bundles and gzips web/ into the firmware
-    web/                    Dashboard sources (no framework)
-      js/                   App modules, bundled into app.js in a fixed order
-      css/                  Styles, bundled into style.css in filename order
-    sensor.py, text_sensor.py, switch.py   Entity platforms
-installer/
-  index.html                Web installer page (esp-web-tools), published to GitHub Pages
-  build_site.py             Assembles the page, manifest and firmware image
-  local_esphome_config.py   Points the install config at the local component for CI builds
-```
-
-### Dashboard development
-
-Edit the sources in `esphome/components/cgo/web/`. They are bundled and embedded on every `esphome compile`. A new JS file must be added to `JS_ORDER` in `web_assets.py`; CSS files are bundled in filename order. Run `python3 esphome/components/cgo/web_assets.py` to see the bundle sizes.
+It is an independent project, **not affiliated with, endorsed by or sponsored by Tenways**. *Tenways* and the
+model names are trademarks of their owner, used only to identify the bikes the bridge works with. Use it at
+your own risk.

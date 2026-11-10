@@ -1,9 +1,11 @@
-# C++ style for esphome/components/cgo — ESPHome conventions with the
+# C++ style for esphome/components/tenways — ESPHome conventions with the
 # repo's 4-space indent. See AGENTS.md.
 ---
 Language: Cpp
 BasedOnStyle: Google
 IndentWidth: 4
+# public:/protected: one space in, as everywhere in the code.
+AccessModifierOffset: -3
 TabWidth: 4
 UseTab: Never
 ColumnLimit: 120

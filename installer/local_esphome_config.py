@@ -1,4 +1,4 @@
-"""Write a copy of esphome/cgo600-install.yaml that uses the local component.
+"""Write a copy of esphome/tenways-bridge.yaml that uses the local component.
 
 The install configuration pulls the component from the main branch on GitHub,
 which is what adopted devices should track. CI and release builds must compile
@@ -12,7 +12,7 @@ Usage:
 import os
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-SRC = os.path.join(ROOT, "esphome", "cgo600-install.yaml")
+SRC = os.path.join(ROOT, "esphome", "tenways-bridge.yaml")
 OUT = os.path.join(ROOT, "esphome", ".install-ci.yaml")
 
 LOCAL_SOURCE = ["  - source:", "      type: local", "      path: components"]
@@ -20,7 +20,9 @@ LOCAL_SOURCE = ["  - source:", "      type: local", "      path: components"]
 
 def main():
     out, in_source, replaced = [], False, False
-    for line in open(SRC, encoding="utf-8").read().splitlines():
+    with open(SRC, encoding="utf-8") as f:
+        lines = f.read().splitlines()
+    for line in lines:
         if line.strip() == "- source:" and not replaced:
             out.extend(LOCAL_SOURCE)
             in_source, replaced = True, True
@@ -30,10 +32,10 @@ def main():
         in_source = False
         out.append(line)
     if not replaced:
-        raise SystemExit("[ESPHOME] No external_components source found in %s" % SRC)
+        raise SystemExit(f"[ESPHOME] No external_components source found in {SRC}")
     with open(OUT, "w", encoding="utf-8") as f:
         f.write("\n".join(out) + "\n")
-    print("[ESPHOME] Wrote %s" % os.path.relpath(OUT, ROOT))
+    print(f"[ESPHOME] Wrote {os.path.relpath(OUT, ROOT)}")
 
 
 if __name__ == "__main__":

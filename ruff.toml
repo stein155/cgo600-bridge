@@ -1,0 +1,18 @@
+target-version = "py312"
+line-length = 120
+
+[lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # import order
+    "UP",  # newer syntax
+    "B",   # likely bugs
+    "SIM", # simplifications
+    "RUF", # ruff's own checks
+]
+
+[lint.isort]
+# ESPHome's own components put the esphome imports in one block.
+known-first-party = ["esphome"]

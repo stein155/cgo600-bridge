@@ -1,0 +1,20 @@
+ignore: |
+  esphome/.esphome/
+  esphome/.install-*.yaml
+  esphome/live.yaml
+  site/
+extends: default
+
+rules:
+  line-length:
+    max: 120
+  # ESPHome and GitHub Actions files are single documents without "---".
+  document-start: disable
+  # GitHub Actions uses "on:" as a key.
+  truthy:
+    check-keys: false
+  comments:
+    min-spaces-from-content: 1
+  # ESPHome's !secret, !include and !extend tags.
+  braces:
+    max-spaces-inside: 1

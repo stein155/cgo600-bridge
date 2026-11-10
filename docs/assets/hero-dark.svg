@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1280 600" width="1280" height="600" role="img" aria-label="Tenways Bridge">
+<defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="0"><stop offset="0" stop-color="#2997ff"/><stop offset="0.55" stop-color="#40c8e0"/><stop offset="1" stop-color="#30d158"/></linearGradient></defs>
+<rect width="1280" height="600" rx="28" fill="#000000"/>
+<text x="640" y="112" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="24" font-weight="600" fill="#a1a1a6" letter-spacing="0.2">Tenways Bridge</text>
+<text x="640" y="212" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="92" font-weight="700" fill="#f5f5f7" letter-spacing="-3.5">Your e-bike.</text>
+<text x="640" y="312" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="92" font-weight="700" fill="url(#g)" letter-spacing="-3.5">Now in Home Assistant.</text>
+<text x="640" y="374" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="27" fill="#a1a1a6" letter-spacing="-0.2">Battery, odometer and your rides. Without reaching for your phone.</text>
+<path d="M478 482 H602" stroke="#48484a" stroke-width="2.4" stroke-dasharray="1 9" stroke-linecap="round"/>
+<path d="M678 482 H822" stroke="#48484a" stroke-width="2.4" stroke-dasharray="1 9" stroke-linecap="round"/>
+<g transform="translate(420,480) scale(1.25)"><g fill="none" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" stroke="#f5f5f7"><circle cx="-22" cy="10" r="15"/><circle cx="24" cy="10" r="15"/>
+    <path d="M-22 10 L-7 -12 L15 -12 L1 10 Z"/><path d="M-7 -12 L1 10"/><path d="M24 10 L15 -12 L13 -20 L21 -20"/><path d="M-12 -17 L-2 -17 M-7 -12 L-7 -17"/></g></g>
+<text x="420" y="542" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="17" font-weight="500" fill="#a1a1a6">Tenways bike</text>
+<g transform="translate(640,480) scale(1.25)"><g fill="none" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" stroke="#f5f5f7"><rect x="-15" y="-15" width="30" height="30" rx="6"/><rect x="-6" y="-6" width="12" height="12" rx="2.5"/><path d="M-8 -22 V-15 M-8 15 V22 M-22 -8 H-15 M15 -8 H22"/><path d="M0 -22 V-15 M0 15 V22 M-22 0 H-15 M15 0 H22"/><path d="M8 -22 V-15 M8 15 V22 M-22 8 H-15 M15 8 H22"/></g></g>
+<text x="640" y="542" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="17" font-weight="500" fill="#a1a1a6">ESP32</text>
+<g transform="translate(860,480) scale(1.25)"><g fill="none" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" stroke="#f5f5f7"><path d="M-22 -1 L0 -21 L22 -1"/><path d="M-16 -5 V19 H16 V-5"/><path d="M-5 19 V6 H5 V19"/></g></g>
+<text x="860" y="542" text-anchor="middle" font-family="-apple-system, BlinkMacSystemFont, 'SF Pro Display', 'Helvetica Neue', Helvetica, Arial, sans-serif" font-size="17" font-weight="500" fill="#a1a1a6">Home Assistant</text>
+</svg>

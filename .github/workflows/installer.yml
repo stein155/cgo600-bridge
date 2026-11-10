@@ -26,35 +26,43 @@ jobs:
           python-version: '3.12'
 
       - name: Install ESPHome
-        run: pip install esphome==2026.6.5
+        run: pip install esphome==2026.10.0
 
       - name: Determine version
         id: version
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
-          if [ "${{ github.event_name }}" = "release" ]; then
-            echo "version=${{ github.event.release.tag_name }}" >> "$GITHUB_OUTPUT"
+          if [ "$EVENT_NAME" = "release" ]; then
+            echo "version=$RELEASE_TAG" >> "$GITHUB_OUTPUT"
           else
             echo "version=dev-$(git rev-parse --short HEAD)" >> "$GITHUB_OUTPUT"
           fi
 
       - name: Build firmware
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
           python3 installer/local_esphome_config.py
-          esphome -s project_version "${{ steps.version.outputs.version }}" compile esphome/.install-ci.yaml
+          esphome -s project_version "$VERSION" compile esphome/.install-ci.yaml
 
       - name: Assemble installer site
-        run: python3 installer/build_site.py --version "${{ steps.version.outputs.version }}" --out site
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+        run: python3 installer/build_site.py --version "$VERSION" --out site
 
       - name: Attach firmware to the release
         if: github.event_name == 'release'
         env:
           GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
         run: |
-          BUILD=esphome/.esphome/build/cgo600-bridge/.pioenvs/cgo600-bridge
-          cp "$BUILD/firmware.factory.bin" cgo600-bridge-factory.bin
-          cp "$BUILD/firmware.ota.bin" cgo600-bridge-ota.bin
-          sha256sum cgo600-bridge-*.bin > SHA256SUMS
-          gh release upload "${{ github.event.release.tag_name }}" cgo600-bridge-*.bin SHA256SUMS --clobber
+          BUILD=esphome/.esphome/build/tenways-bridge/build
+          cp "$BUILD/firmware.factory.bin" tenways-bridge-factory.bin
+          cp "$BUILD/firmware.ota.bin" tenways-bridge-ota.bin
+          sha256sum tenways-bridge-*.bin > SHA256SUMS
+          gh release upload "$RELEASE_TAG" tenways-bridge-*.bin SHA256SUMS --clobber
 
       - uses: actions/upload-pages-artifact@v3
         with:
