@@ -28,6 +28,9 @@ static constexpr uint32_t DATA_TIMEOUT_MS = 15000;
 static constexpr uint32_t FIRST_DATA_TIMEOUT_MS = 30000;
 static constexpr uint32_t LIGHT_CONFIRM_WINDOW_MS = 2000;
 static constexpr uint32_t CCCD_CONFIRM_TIMEOUT_MS = 1000;
+// The scan is off for every bike while one is being set up, so a setup that
+// hangs is given up after this long.
+static constexpr uint32_t SETUP_TIMEOUT_MS = 20000;
 // King Meter support is unconfirmed on most bikes: log the first traffic of
 // every connection at DEBUG so a default log shows it, the rest at VERBOSE.
 static constexpr uint32_t DEBUG_LOGGED = 20;
@@ -171,8 +174,18 @@ void TenwaysComponent::connect() {
     // Scanning alongside the setup costs connections too: it stays off until
     // the bike is polled or the session resets. An attempt that already
     // failed has reset the session.
-    if (this->state() == espbt::ClientState::CONNECTING)
-        bike_scan_v2::begin_setup(this);
+    if (this->state() != espbt::ClientState::CONNECTING)
+        return;
+    bike_scan_v2::begin_setup(this);
+    // On the scheduler: it has to run whatever state the client hangs in.
+    this->set_timeout("setup", SETUP_TIMEOUT_MS, [this]() {
+        if (this->phase_ == Phase::POLLING || this->state() == espbt::ClientState::IDLE)
+            return;
+        ESP_LOGW(TAG, "Connection setup took longer than %u s, giving up", (unsigned) (SETUP_TIMEOUT_MS / 1000));
+        // Release the scan now; the disconnect can take a while to complete.
+        bike_scan_v2::end_setup(this);
+        this->disconnect();
+    });
 }
 
 void TenwaysComponent::gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param) {
@@ -611,6 +624,7 @@ void TenwaysComponent::finish_handshake_(uint32_t now) {
     this->update_ble_status_();
     // The setup is over: the scan may run again for bikes still searching.
     // The tracker only looks at the scan after a client state change.
+    this->cancel_timeout("setup");
     bike_scan_v2::end_setup(this);
     this->set_state_internal_(this->state());
 }
@@ -823,6 +837,7 @@ void TenwaysComponent::reset_session_() {
     this->enc_packets_.reset();
     // Last, so the coordinator sees this bike searching again: every way out
     // of a setup ends here.
+    this->cancel_timeout("setup");
     bike_scan_v2::end_setup(this);
 }
 
