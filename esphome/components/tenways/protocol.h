@@ -70,16 +70,23 @@ class FrameParser {
  public:
     static constexpr size_t BUFFER_SIZE = 512;
 
-    void reset() { this->len_ = 0; }
+    void reset() {
+        this->len_ = 0;
+        this->frames_ = 0;
+    }
     // Appends data and decodes every complete frame. Returns true if any field
     // was decoded; frames failing the CRC check are counted in bad_crc.
     bool feed(BikeState &state, const uint8_t *data, size_t len, uint32_t &bad_crc);
+
+    // Frames that passed the CRC check since the last reset.
+    uint32_t frames() const { return this->frames_; }
 
  private:
     void append_(const uint8_t *data, size_t len);
 
     uint8_t buffer_[BUFFER_SIZE]{};
     size_t len_{0};
+    uint32_t frames_{0};
 };
 
 // King Meter transport used by newer Tenways displays such as the CGO800.

@@ -201,6 +201,7 @@ bool FrameParser::feed(BikeState &state, const uint8_t *data, size_t len, uint32
         if (crc16(this->buffer_, 2 + payload_len) != expected) {
             ++bad_crc;
         } else {
+            ++this->frames_;
             size_t pos = 2;
             const size_t payload_end = 2 + payload_len;
             while (pos + 2 <= payload_end) {

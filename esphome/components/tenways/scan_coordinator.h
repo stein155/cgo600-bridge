@@ -1,10 +1,18 @@
 #pragma once
 
-// Scan coordination between BLE bike components on one ESP32. Scanning costs
-// connection events while WiFi shares the radio, so it pauses once no bike is
-// searching, and runs as long as any bike still is. Other components that ship
-// this same file join the same registry: the linker merges the inline
-// functions and their statics.
+// Scan coordination between BLE bike components on one ESP32.
+//
+// Bikes are often in range for only a few seconds, so the scan runs at its
+// full configured window as long as any bike is searching. Two things switch
+// it off:
+// - A bike is being set up (open, service discovery, subscribe, handshake).
+//   Scanning starves that link, so the scan stays off until the last bike in
+//   setup is ready or has dropped, even when other bikes are still searching.
+// - Every bike is connected: nothing is left to find, and the radio is left
+//   to the connections and WiFi.
+//
+// Other components that ship this same file join the same registry: the
+// linker merges the inline functions and their statics.
 //
 // Keep this file identical wherever it is shipped; bump the namespace version
 // when its layout changes.
@@ -16,12 +24,13 @@
 
 #include "esphome/components/esp32_ble_tracker/esp32_ble_tracker.h"
 
-namespace esphome::bike_scan_v1 {
+namespace esphome::bike_scan_v2 {
 
 class ScanUser {
  public:
-    // True while this bike still needs advertisements: not connected, or
-    // resting and watching for the bike to leave.
+    // True while this bike still needs advertisements: it is searching, or
+    // resting and watching for the bike to leave. A bike that is being set up
+    // is never asked.
     virtual bool needs_scan() const = 0;
 
  protected:
@@ -29,6 +38,12 @@ class ScanUser {
 };
 
 inline std::vector<const ScanUser *> &users() {
+    static std::vector<const ScanUser *> list;
+    return list;
+}
+
+// The bikes between connect() and the end of their setup.
+inline std::vector<const ScanUser *> &in_setup() {
     static std::vector<const ScanUser *> list;
     return list;
 }
@@ -44,30 +59,51 @@ inline void add_user(const ScanUser *user) {
         list.push_back(user);
 }
 
-// Called by a bike that starts connecting: stops the scan unless another bike
-// still needs it.
-inline void pause_unless_needed(const ScanUser *self) {
+// Applies the scan state the bikes want now. The tracker restarts a wanted
+// scan from its loop, which only looks again after a client changed state: a
+// caller whose client state did not change has to notify the tracker itself.
+inline void update() {
     auto *tracker = esp32_ble_tracker::global_esp32_ble_tracker;
-    if (tracker == nullptr || paused())
+    if (tracker == nullptr)
         return;
-    for (const auto *user : users()) {
-        if (user != self && user->needs_scan())
-            return;
+    bool wanted = false;
+    if (in_setup().empty()) {
+        for (const auto *user : users()) {
+            if (user->needs_scan()) {
+                wanted = true;
+                break;
+            }
+        }
     }
-    paused() = true;
-    tracker->stop_scan();
-}
-
-// Called by a bike that lost its connection.
-inline void resume() {
-    auto *tracker = esp32_ble_tracker::global_esp32_ble_tracker;
-    if (tracker == nullptr || !paused())
+    if (wanted != paused())
         return;
-    paused() = false;
-    // The tracker restarts the scan from its loop once the scanner is idle.
-    tracker->set_scan_continuous(true);
+    paused() = !wanted;
+    if (wanted) {
+        tracker->set_scan_continuous(true);
+    } else {
+        // Also keeps the tracker from restarting the scan once the client is
+        // connected.
+        tracker->stop_scan();
+    }
 }
 
-}  // namespace esphome::bike_scan_v1
+// Called by a bike that starts connecting: the scan stays off until its
+// end_setup().
+inline void begin_setup(const ScanUser *user) {
+    auto &list = in_setup();
+    if (std::find(list.begin(), list.end(), user) == list.end())
+        list.push_back(user);
+    update();
+}
+
+// Called by a bike whose setup ended, ready or not, and whenever its
+// needs_scan() may have changed. Safe to call for a bike that is not in setup.
+inline void end_setup(const ScanUser *user) {
+    auto &list = in_setup();
+    list.erase(std::remove(list.begin(), list.end(), user), list.end());
+    update();
+}
+
+}  // namespace esphome::bike_scan_v2
 
 #endif  // USE_ESP32

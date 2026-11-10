@@ -23,10 +23,10 @@ namespace espbt = esphome::esp32_ble_tracker;
 
 // BLE client for one Tenways display. Unlike the stock ble_client it needs no
 // MAC address: it connects to the first advertiser whose name contains one of
-// device_names, or that advertises no name but a known service, and that no
-// other block holds. The transport follows from the services: Nordic UART
-// (CGO600 family) or King Meter (newer Tenways displays).
-class TenwaysComponent : public esp32_ble_client::BLEClientBase, public bike_scan_v1::ScanUser {
+// device_names and that no other block holds. A bike it found that way is
+// also recognised when it later advertises its service without a name. The transport follows from the services: Nordic
+// UART (CGO600 family) or King Meter (newer Tenways displays).
+class TenwaysComponent : public esp32_ble_client::BLEClientBase, public bike_scan_v2::ScanUser {
  public:
     void setup() override;
     void loop() override;
@@ -37,6 +37,7 @@ class TenwaysComponent : public esp32_ble_client::BLEClientBase, public bike_sca
     void set_state(espbt::ClientState state) override;
     void connect() override;
     void gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param) override;
+    // Searching; the coordinator does not ask while the bike is being set up.
     bool needs_scan() const override { return this->phase_ == Phase::IDLE; }
 
     // Key of this bike's state in flash; the block's id.
@@ -65,8 +66,9 @@ class TenwaysComponent : public esp32_ble_client::BLEClientBase, public bike_sca
     enum class Phase : uint8_t { IDLE, HANDSHAKE, POLLING };
     enum class Transport : uint8_t { NONE, NUS, KING_METER };
 
-    bool matches_(const espbt::ESPBTDevice &device) const;
+    bool matches_(const espbt::ESPBTDevice &device);
     bool claimed_by_other_(uint64_t address) const;
+    void handle_frames_(const uint8_t *data, size_t len);
     void on_services_ready_();
     void log_services_();
     void log_bytes_(const char *what, uint16_t handle, const uint8_t *data, size_t len, bool debug);
@@ -101,6 +103,11 @@ class TenwaysComponent : public esp32_ble_client::BLEClientBase, public bike_sca
     std::vector<std::string> device_names_;
     // Advertised name of the bike being connected; picks the King Meter profile.
     std::string bike_name_;
+    // Addresses this block matched by name since boot, the oldest replaced
+    // first; 0 is an empty slot.
+    static constexpr size_t MAX_KNOWN_ADDRESSES = 4;
+    uint64_t known_addresses_[MAX_KNOWN_ADDRESSES]{};
+    uint8_t known_address_next_{0};
     uint32_t poll_interval_ms_{1000};
 
     Phase phase_{Phase::IDLE};
@@ -127,6 +134,8 @@ class TenwaysComponent : public esp32_ble_client::BLEClientBase, public bike_sca
     LinkStats link_stats_;
     const protocol::km::Profile *km_profile_{nullptr};
     uint8_t km_unanswered_polls_{0};
+    // The other request layout was tried this connection.
+    bool km_alternative_tried_{false};
     uint32_t last_km_summary_{0};
     enum class EncHandshake : uint8_t { NONE, WAIT_RANDOM, WAIT_IV, DONE };
     EncHandshake enc_handshake_{EncHandshake::NONE};
@@ -137,6 +146,7 @@ class TenwaysComponent : public esp32_ble_client::BLEClientBase, public bike_sca
     // A CGO600 that ignored the app's status read gets the older requests.
     bool nus_legacy_{false};
     uint8_t static_requests_{0};
+    // When the bike last sent a valid frame; error replies do not count.
     uint32_t last_rx_ms_{0};
     static constexpr size_t MAX_WRITE_LEN = 64;
     static constexpr size_t TX_QUEUE_SIZE = 8;
@@ -158,6 +168,8 @@ class TenwaysComponent : public esp32_ble_client::BLEClientBase, public bike_sca
     uint8_t enc_app_random_[protocol::HANDSHAKE_VALUE_LEN]{};
     uint8_t enc_session_key_[32]{};
     protocol::Session enc_session_;
+    // Puts encrypted packets back together from the notifications.
+    protocol::PacketAssembler enc_packets_;
     // After a light command, light reports that still show the old state are
     // ignored until this deadline; the bike applies the change with a delay.
     bool light_pending_{false};

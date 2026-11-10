@@ -104,14 +104,15 @@ flowchart LR
   t -- ESPHome API --> ha
 ```
 
-- **Discovery without pairing.** The bridge connects to the first bike whose Bluetooth name matches, or that
-  advertises a Tenways service without a name.
+- **Discovery without pairing.** The bridge connects to the first bike whose Bluetooth name matches. A bike
+  it found that way is also recognised when it later advertises its Tenways service without a name.
 - **Two transports.** The CGO600 family speaks Nordic UART; newer displays such as the CGO800 speak the King
   Meter protocol, with a model profile picked from the bike's name. Displays that need it get the encrypted
   session of the Tenways app. The [protocol reference](docs/protocols.md) has the details.
 - **Built for short visits.** A bike is often in range for only a few seconds when you leave or come home.
-  The bridge keeps scanning as long as any bike is still searching, and only pauses scanning once every bike
-  is connected, so WiFi and Bluetooth share the radio well.
+  The bridge scans at its full window as long as any bike is still searching. Scanning stops only while a
+  bike is being set up, from connecting until its first poll, because a scan next to it costs the connection,
+  and once every bike is connected, so WiFi and Bluetooth share the radio well.
 
 ## Multiple bikes
 
@@ -139,7 +140,7 @@ A block only connects to a bike no other block holds.
 **Other bikes on the same ESP32.** Other ESPHome bike components that ship the same `scan_coordinator.h`,
 such as [b06-bridge](https://github.com/stein155/b06-bridge), run next to this one. Add both
 `external_components` entries and both blocks; scanning then keeps running until the bikes of both are
-connected.
+connected, and stops while any of them is being set up.
 
 ## Home Assistant
 
@@ -156,14 +157,15 @@ connected.
 
 **Rides.** The [ride blueprint](homeassistant/blueprints/automation/tenways_rides.yaml) logs every ride of a bike
 as an event in a calendar, such as a [local calendar](https://www.home-assistant.io/integrations/local_calendar/),
-which keeps it permanently. It works from the odometer, which never resets: a ride is counted even when the
+which keeps it permanently. It works from the odometer, not from the trip counters: a ride is counted even when the
 bridge missed the arrival, and rides between two sightings of the bike count as one. Each ride has its start and
 end, distance, duration, average speed and battery use; it also fires the `tenways_ride` event and can update a
 text helper with the last ride. Per bike, create a text helper (maximum length 255) for the blueprint's state,
 create an automation from the blueprint, and run it once. A calendar card in list view shows the rides.
 
 **Distance per period.** The odometer is a `total_increasing` sensor, so Home Assistant keeps long-term
-statistics for it. A statistics graph card shows the distance per day, week or month:
+statistics for it. A bike can restart its odometer by itself; Home Assistant and the ride blueprint treat the
+lower value as a new meter reading and count on from there. A statistics graph card shows the distance per day, week or month:
 
 ```yaml
 type: statistics-graph

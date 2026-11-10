@@ -13,7 +13,7 @@ static constexpr uint8_t PACKET_END = 0x5A;
 static constexpr uint8_t PACKET_ENCRYPTED = 0x80;
 static constexpr size_t BLOCK = 16;
 // Largest padded frame wrap() encrypts; requests are far smaller.
-static constexpr size_t MAX_PLAIN = 256;
+static constexpr size_t MAX_PLAIN = MAX_PACKET_PAYLOAD;
 
 // The input key of the session key derivation, fixed in the Tenways app.
 static const uint8_t SESSION_SECRET[32] = {0x12, 0x34, 0x56, 0x78, 0x90, 0xAB, 0xCD, 0xEF, 0x11, 0x22, 0x33,
@@ -143,6 +143,56 @@ size_t Session::unwrap(const uint8_t *packet, size_t len, uint8_t *out, size_t o
             return 0;
     }
     return payload_len - pad;
+}
+
+void PacketAssembler::reset() {
+    this->len_ = 0;
+    this->returned_ = 0;
+    this->skipped_bytes_ = 0;
+}
+
+void PacketAssembler::drop_(size_t count) {
+    memmove(this->buffer_, this->buffer_ + count, this->len_ - count);
+    this->len_ -= count;
+}
+
+size_t PacketAssembler::feed(const uint8_t *data, size_t len) {
+    this->drop_(this->returned_);
+    this->returned_ = 0;
+    const size_t taken = len < sizeof(this->buffer_) - this->len_ ? len : sizeof(this->buffer_) - this->len_;
+    memcpy(this->buffer_ + this->len_, data, taken);
+    this->len_ += taken;
+    return taken;
+}
+
+const uint8_t *PacketAssembler::next(size_t &len) {
+    this->drop_(this->returned_);
+    this->returned_ = 0;
+    for (;;) {
+        size_t start = 0;
+        while (start < this->len_ && this->buffer_[start] != PACKET_START)
+            ++start;
+        this->skipped_bytes_ += start;
+        this->drop_(start);
+        if (this->len_ < 3)
+            return nullptr;
+        const size_t payload_len = ((size_t) (this->buffer_[1] & 0x7F) << 8) | this->buffer_[2];
+        const size_t packet_len = payload_len + PACKET_OVERHEAD;
+        if (payload_len <= MAX_PACKET_PAYLOAD) {
+            if (this->len_ < packet_len)
+                return nullptr;
+            const uint16_t expected = ((uint16_t) this->buffer_[5 + payload_len] << 8) | this->buffer_[6 + payload_len];
+            if (this->buffer_[packet_len - 1] == PACKET_END && crc16(this->buffer_, 5 + payload_len) == expected) {
+                this->returned_ = packet_len;
+                len = packet_len;
+                return this->buffer_;
+            }
+        }
+        // Not a packet start after all: search again from the next byte, so a
+        // stray 0xA5 cannot swallow the real packets behind it.
+        ++this->skipped_bytes_;
+        this->drop_(1);
+    }
 }
 
 }  // namespace esphome::tenways::protocol

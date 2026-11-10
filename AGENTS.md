@@ -19,8 +19,8 @@ No additional agent/editor rule files currently exist in this repo:
 - `esphome/components/tenways/tenways.h/.cpp`: BLE client (discovery, handshake, polling, entities)
 - `esphome/components/tenways/protocol.h/.cpp`: Nordic UART and King Meter frames, CRC-16/MODBUS, field decoding
 - `esphome/components/tenways/crypto.h/.cpp`: the encrypted session of the CGO800 Plus and CGO600 variants
-- `esphome/components/tenways/scan_coordinator.h`: scan pausing shared with other bike components; keep it
-  identical to the copies in those repositories
+- `esphome/components/tenways/scan_coordinator.h`: scan pausing (during a connection setup, and once every bike
+  is connected) shared with other bike components; keep it identical to the copies in those repositories
 - `esphome/tenways-bridge.yaml`: configuration flashed by the web installer
 - `esphome/bike.yaml`: package for one bike as its own Home Assistant device
 - `esphome/dev.yaml`: development configuration with two bikes (uses `esphome/secrets.yaml`)

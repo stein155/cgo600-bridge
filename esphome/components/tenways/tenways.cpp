@@ -79,7 +79,7 @@ std::vector<TenwaysComponent *> TenwaysComponent::instances_;
 void TenwaysComponent::setup() {
     BLEClientBase::setup();
     instances_.push_back(this);
-    bike_scan_v1::add_user(this);
+    bike_scan_v2::add_user(this);
     this->restore_last_state_();
     this->update_ble_status_();
 }
@@ -104,13 +104,23 @@ void TenwaysComponent::dump_config() {
     LOG_SWITCH("  ", "Light", this->light_switch_);
 }
 
-bool TenwaysComponent::matches_(const espbt::ESPBTDevice &device) const {
+bool TenwaysComponent::matches_(const espbt::ESPBTDevice &device) {
+    const uint64_t address = device.address_uint64();
+    const bool known = std::find(std::begin(this->known_addresses_), std::end(this->known_addresses_), address) !=
+                       std::end(this->known_addresses_);
     for (const auto &name : this->device_names_) {
-        if (contains_ignore_case(device.get_name(), name))
-            return true;
+        if (!contains_ignore_case(device.get_name(), name))
+            continue;
+        if (!known) {
+            this->known_addresses_[this->known_address_next_] = address;
+            this->known_address_next_ = (this->known_address_next_ + 1) % MAX_KNOWN_ADDRESSES;
+        }
+        return true;
     }
-    // The bike sometimes omits its name; its service still identifies it.
-    if (!device.get_name().empty())
+    // The bike sometimes omits its name. Its service alone would also match
+    // other people's bikes and unrelated devices, so only an address this
+    // block matched by name before is taken.
+    if (!device.get_name().empty() || !known)
         return false;
     for (const auto &uuid : device.get_service_uuids()) {
         if (uuid == NUS_SERVICE_UUID || uuid == KM_SERVICE_UUID)
@@ -157,9 +167,12 @@ void TenwaysComponent::connect() {
     this->got_data_ = false;
     // Leave the connection parameters to the stack, like the bikes' own apps:
     // forcing short intervals or updating them during setup cost connections.
-    // Scanning alongside the setup does too.
-    bike_scan_v1::pause_unless_needed(this);
     BLEClientBase::connect();
+    // Scanning alongside the setup costs connections too: it stays off until
+    // the bike is polled or the session resets. An attempt that already
+    // failed has reset the session.
+    if (this->state() == espbt::ClientState::CONNECTING)
+        bike_scan_v2::begin_setup(this);
 }
 
 void TenwaysComponent::gap_event_handler(esp_gap_ble_cb_event_t event, esp_ble_gap_cb_param_t *param) {
@@ -190,7 +203,6 @@ bool TenwaysComponent::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_
                 break;
             }
             ESP_LOGD(TAG, "Subscribed, starting handshake");
-            bike_scan_v1::pause_unless_needed(this);
             this->phase_ = Phase::HANDSHAKE;
             this->next_step_at_ = millis() + SUBSCRIBE_SETTLE_MS;
             // The base class enables notifications by writing this descriptor.
@@ -227,7 +239,6 @@ bool TenwaysComponent::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_
         case ESP_GATTC_NOTIFY_EVT: {
             if (param->notify.handle != this->tx_handle_)
                 break;
-            this->last_rx_ms_ = millis();
             const bool km = this->transport_ == Transport::KING_METER;
             auto &stats = this->link_stats_;
             const uint8_t *data = param->notify.value;
@@ -235,48 +246,47 @@ bool TenwaysComponent::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_
             ++stats.notifications;
             stats.notification_bytes += len;
             this->log_bytes_("RX", param->notify.handle, data, len, km && stats.notifications <= DEBUG_LOGGED);
-            uint8_t plain[MAX_FRAME_LEN];
+            // An error reply is no data from the bike: it leaves the data
+            // watchdog running.
             if (is_at_reply(data, len)) {
                 this->handle_at_reply_(data, len);
                 break;
             }
-            if (this->handle_enc_handshake_reply_(data, len))
+            if (this->handle_enc_handshake_reply_(data, len)) {
+                this->last_rx_ms_ = millis();
                 break;
-            if (this->enc_session_.active()) {
-                len = this->enc_session_.unwrap(data, len, plain, sizeof(plain));
-                if (len == 0) {
-                    ++stats.undecryptable;
-                    ESP_LOGW(TAG, "Could not decrypt a notification (%u this connection)",
-                             (unsigned) stats.undecryptable);
+            }
+            if (!this->enc_session_.active()) {
+                this->handle_frames_(data, len);
+                break;
+            }
+            // A packet that does not fit the MTU spans several notifications.
+            const uint32_t skipped_before = this->enc_packets_.skipped_bytes();
+            while (len > 0) {
+                const size_t taken = this->enc_packets_.feed(data, len);
+                if (taken == 0)
                     break;
+                data += taken;
+                len -= taken;
+                const uint8_t *packet;
+                size_t packet_len;
+                while ((packet = this->enc_packets_.next(packet_len)) != nullptr) {
+                    uint8_t plain[MAX_FRAME_LEN];
+                    const size_t plain_len = this->enc_session_.unwrap(packet, packet_len, plain, sizeof(plain));
+                    if (plain_len == 0) {
+                        ++stats.undecryptable;
+                        ESP_LOGW(TAG, "Could not decrypt a packet (%u this connection)",
+                                 (unsigned) stats.undecryptable);
+                        continue;
+                    }
+                    this->log_bytes_("RX decrypted", param->notify.handle, plain, plain_len,
+                                     stats.notifications <= DEBUG_LOGGED);
+                    this->handle_frames_(plain, plain_len);
                 }
-                data = plain;
-                this->log_bytes_("RX decrypted", param->notify.handle, data, len, stats.notifications <= DEBUG_LOGGED);
             }
-            bool changed;
-            const uint32_t bad_crc_before = stats.bad_crc;
-            const uint32_t unhandled_before = stats.unhandled;
-            if (km) {
-                changed = this->km_parser_.feed(this->state_, data, len, stats.bad_crc, stats.unhandled);
-            } else {
-                changed = this->parser_.feed(this->state_, data, len, stats.bad_crc);
-                if (this->state_.power_w >= 0 && !this->power_seen_) {
-                    this->power_seen_ = true;
-                    ESP_LOGD(TAG, "Bike reports its power, polling it");
-                }
-            }
-            if (stats.bad_crc != bad_crc_before)
-                ESP_LOGD(TAG, "Frame failed the CRC check (%u this connection)", (unsigned) stats.bad_crc);
-            if (stats.unhandled != unhandled_before)
-                ESP_LOGD(TAG, "Received a frame without known fields (%u this connection)", (unsigned) stats.unhandled);
-            if (changed) {
-                if (!this->got_data_) {
-                    ESP_LOGI(TAG, "First data %u ms after connecting",
-                             (unsigned) (millis() - this->connect_started_ms_));
-                    this->got_data_ = true;
-                }
-                this->last_state_dirty_ = true;
-                this->publish_state_();
+            if (this->enc_packets_.skipped_bytes() != skipped_before) {
+                ESP_LOGD(TAG, "Skipped bytes outside a packet (%u this connection)",
+                         (unsigned) this->enc_packets_.skipped_bytes());
             }
             break;
         }
@@ -291,6 +301,43 @@ bool TenwaysComponent::gattc_event_handler(esp_gattc_cb_event_t event, esp_gatt_
             break;
     }
     return true;
+}
+
+// Parses the display's frames, decrypted where needed. Only a frame that
+// passes its CRC check counts as data from the bike for the data watchdog.
+void TenwaysComponent::handle_frames_(const uint8_t *data, size_t len) {
+    auto &stats = this->link_stats_;
+    const uint32_t bad_crc_before = stats.bad_crc;
+    const uint32_t unhandled_before = stats.unhandled;
+    bool changed;
+    bool got_frame;
+    if (this->transport_ == Transport::KING_METER) {
+        const uint32_t frames_before = this->km_parser_.frames();
+        changed = this->km_parser_.feed(this->state_, data, len, stats.bad_crc, stats.unhandled);
+        got_frame = this->km_parser_.frames() != frames_before;
+    } else {
+        const uint32_t frames_before = this->parser_.frames();
+        changed = this->parser_.feed(this->state_, data, len, stats.bad_crc);
+        got_frame = this->parser_.frames() != frames_before;
+        if (this->state_.power_w >= 0 && !this->power_seen_) {
+            this->power_seen_ = true;
+            ESP_LOGD(TAG, "Bike reports its power, polling it");
+        }
+    }
+    if (got_frame)
+        this->last_rx_ms_ = millis();
+    if (stats.bad_crc != bad_crc_before)
+        ESP_LOGD(TAG, "Frame failed the CRC check (%u this connection)", (unsigned) stats.bad_crc);
+    if (stats.unhandled != unhandled_before)
+        ESP_LOGD(TAG, "Received a frame without known fields (%u this connection)", (unsigned) stats.unhandled);
+    if (changed) {
+        if (!this->got_data_) {
+            ESP_LOGI(TAG, "First data %u ms after connecting", (unsigned) (millis() - this->connect_started_ms_));
+            this->got_data_ = true;
+        }
+        this->last_state_dirty_ = true;
+        this->publish_state_();
+    }
 }
 
 void TenwaysComponent::on_services_ready_() {
@@ -518,6 +565,7 @@ bool TenwaysComponent::handle_enc_handshake_reply_(const uint8_t *data, size_t l
         if (iv == nullptr)
             return false;
         this->enc_session_.start(this->enc_session_key_, iv);
+        this->enc_packets_.reset();
         this->enc_handshake_ = EncHandshake::DONE;
         ESP_LOGI(TAG, "Encrypted session established");
         return true;
@@ -561,6 +609,10 @@ void TenwaysComponent::finish_handshake_(uint32_t now) {
     this->last_rx_ms_ = now;
     ESP_LOGI(TAG, "Handshake complete, polling every %u ms", (unsigned) this->poll_interval_ms_);
     this->update_ble_status_();
+    // The setup is over: the scan may run again for bikes still searching.
+    // The tracker only looks at the scan after a client state change.
+    bike_scan_v2::end_setup(this);
+    this->set_state_internal_(this->state());
 }
 
 bool TenwaysComponent::static_fields_missing_() const {
@@ -570,6 +622,8 @@ bool TenwaysComponent::static_fields_missing_() const {
 }
 
 void TenwaysComponent::request_static_fields_() {
+    if (this->static_requests_ >= STATIC_REQUEST_ATTEMPTS)
+        return;
     this->last_static_request_ = millis();
     ++this->static_requests_;
     bool ok;
@@ -595,15 +649,18 @@ void TenwaysComponent::poll_() {
         // A silent display may expect the encryption handshake, or requests in
         // the other CRC order, for example when its name picked the wrong
         // profile or it advertises none. Try the handshake first, then the
-        // other layout.
-        if (this->km_parser_.frames() == 0 && !this->enc_session_.active() && this->link_stats_.at_replies == 0 &&
-            ++this->km_unanswered_polls_ > KM_SWITCH_AFTER_POLLS) {
+        // other layout, each once per connection; after that the polls go on
+        // until the data watchdog reconnects.
+        const bool fallback_left = this->enc_handshake_ == EncHandshake::NONE || !this->km_alternative_tried_;
+        if (fallback_left && this->km_parser_.frames() == 0 && !this->enc_session_.active() &&
+            this->link_stats_.at_replies == 0 && ++this->km_unanswered_polls_ > KM_SWITCH_AFTER_POLLS) {
             this->km_unanswered_polls_ = 0;
             if (this->enc_handshake_ == EncHandshake::NONE) {
                 ESP_LOGI(TAG, "No reply from the bike, trying the encryption handshake");
                 this->start_encryption_(millis());
                 return;
             }
+            this->km_alternative_tried_ = true;
             this->km_profile_ = &protocol::km::alternative_to(*this->km_profile_);
             this->km_parser_.set_profile(this->km_profile_);
             this->km_write_with_response_ = this->km_profile_->write_with_response || this->name_wants_response_();
@@ -689,9 +746,10 @@ void TenwaysComponent::flush_tx_(uint32_t now) {
     }
     if (err != ESP_OK) {
         ESP_LOGW(TAG, "Write failed: %d", err);
-    } else if (this->transport_ != Transport::NUS) {
+    } else {
         ++this->link_stats_.requests;
-        this->log_bytes_("TX", this->rx_handle_, frame.data, frame.len, this->link_stats_.requests <= DEBUG_LOGGED);
+        this->log_bytes_("TX", this->rx_handle_, frame.data, frame.len,
+                         this->transport_ != Transport::NUS && this->link_stats_.requests <= DEBUG_LOGGED);
     }
 }
 
@@ -723,7 +781,6 @@ bool TenwaysComponent::set_light(bool on) {
 }
 
 void TenwaysComponent::reset_session_() {
-    bike_scan_v1::resume();
     if (this->transport_ != Transport::NUS && this->transport_ != Transport::NONE && this->phase_ != Phase::IDLE)
         this->log_km_summary_();
     if (this->phase_ == Phase::POLLING) {
@@ -742,6 +799,7 @@ void TenwaysComponent::reset_session_() {
     this->transport_ = Transport::NONE;
     this->km_profile_ = nullptr;
     this->km_unanswered_polls_ = 0;
+    this->km_alternative_tried_ = false;
     this->power_seen_ = false;
     this->nus_legacy_ = false;
     this->static_requests_ = 0;
@@ -762,6 +820,10 @@ void TenwaysComponent::reset_session_() {
     memset(this->enc_session_key_, 0, sizeof(this->enc_session_key_));
     this->parser_.reset();
     this->km_parser_.reset();
+    this->enc_packets_.reset();
+    // Last, so the coordinator sees this bike searching again: every way out
+    // of a setup ends here.
+    bike_scan_v2::end_setup(this);
 }
 
 void TenwaysComponent::restore_last_state_() {

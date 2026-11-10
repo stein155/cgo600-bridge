@@ -362,6 +362,114 @@ static void test_crypto_packet_bounds() {
     check(session.wrap(frame, frame_len, small, sizeof(small)) == 0, "wrap refuses a buffer that is too small");
 }
 
+// The data watchdog only counts frames that pass the CRC check.
+static void test_nus_parser_frame_count() {
+    FrameParser parser;
+    BikeState state;
+    uint32_t bad = 0;
+    const Bytes battery = reply({0x52, 3, FIELD_BATTERY, 1, 64});
+    static const uint8_t ERROR_REPLY[] = "AT+NAME=ERR";
+    FrameParser errors;
+    errors.feed(state, ERROR_REPLY, sizeof(ERROR_REPLY) - 1, bad);
+    check(errors.frames() == 0, "an AT reply is no CGO600 frame");
+    Bytes corrupt = battery;
+    corrupt[4] ^= 0xFF;
+    parser.feed(state, corrupt.data(), corrupt.size(), bad);
+    check(parser.frames() == 0 && bad == 1, "a CGO600 frame with a wrong CRC is not counted");
+    parser.feed(state, battery.data(), battery.size(), bad);
+    check(parser.frames() == 1, "a valid CGO600 frame is counted");
+    // A valid frame counts even when it carries no field we decode.
+    const Bytes unknown = reply({0x52, 3, 0xEE, 1, 0x00});
+    check(!parser.feed(state, unknown.data(), unknown.size(), bad) && parser.frames() == 2,
+          "a valid CGO600 frame without known fields is counted");
+    parser.reset();
+    check(parser.frames() == 0, "reset clears the CGO600 frame count");
+}
+
+// Collects every packet the assembler returns for one notification.
+static std::vector<Bytes> assemble(PacketAssembler &assembler, const uint8_t *data, size_t len) {
+    std::vector<Bytes> packets;
+    while (len > 0) {
+        const size_t taken = assembler.feed(data, len);
+        data += taken;
+        len -= taken;
+        size_t packet_len;
+        const uint8_t *packet;
+        while ((packet = assembler.next(packet_len)) != nullptr)
+            packets.emplace_back(packet, packet + packet_len);
+        if (taken == 0)
+            break;
+    }
+    return packets;
+}
+
+// Encrypted packets are cut out of the notification stream by the length in
+// their header, whatever the notification boundaries are.
+static void test_crypto_packet_assembly() {
+    uint8_t key[32] = {0}, iv[16] = {0};
+    Session session;
+    session.start(key, iv);
+    // A reply of 40 bytes makes a 56-byte packet: three notifications at MTU 23.
+    Bytes frame = {0x62, 0x00, 0x25, 0x01, 0x05, 0x22};
+    frame.resize(40, 0x31);
+    uint8_t wrapped[80];
+    const Bytes first(wrapped, wrapped + session.wrap(frame.data(), frame.size(), wrapped, sizeof(wrapped)));
+    const Bytes second(wrapped, wrapped + session.wrap(frame.data(), 5, wrapped, sizeof(wrapped)));
+    check(first.size() == 56 && second.size() == 24, "test packets have the expected sizes");
+    uint8_t plain[64];
+
+    PacketAssembler whole;
+    auto packets = assemble(whole, first.data(), first.size());
+    check(packets.size() == 1 && packets[0] == first, "a whole packet passes the assembler");
+    check(session.unwrap(packets[0].data(), packets[0].size(), plain, sizeof(plain)) == frame.size() &&
+              memcmp(plain, frame.data(), frame.size()) == 0,
+          "an assembled packet decrypts to the frame");
+
+    PacketAssembler split;
+    check(assemble(split, first.data(), 20).empty(), "the assembler waits for the rest of a packet");
+    check(assemble(split, first.data() + 20, 20).empty(), "the assembler still waits");
+    packets = assemble(split, first.data() + 40, first.size() - 40);
+    check(packets.size() == 1 && packets[0] == first, "a packet in three chunks is put together");
+    check(session.unwrap(packets[0].data(), packets[0].size(), plain, sizeof(plain)) == frame.size(),
+          "a packet in three chunks decrypts");
+
+    Bytes both = first;
+    both.insert(both.end(), second.begin(), second.end());
+    PacketAssembler pair;
+    packets = assemble(pair, both.data(), both.size());
+    check(packets.size() == 2 && packets[0] == first && packets[1] == second, "two packets in one notification");
+
+    // Garbage with a stray start byte whose length claims more than a packet
+    // holds, and one that claims a plausible length.
+    Bytes dirty = {0x00, 0xA5, 0xFF, 0xFF, 0x13, 0xA5, 0x80, 0x10, 0x37};
+    const size_t garbage = dirty.size();
+    dirty.insert(dirty.end(), first.begin(), first.end());
+    PacketAssembler resync;
+    packets = assemble(resync, dirty.data(), dirty.size());
+    check(packets.size() == 1 && packets[0] == first, "a packet behind garbage is found");
+    check(resync.skipped_bytes() == garbage, "the garbage is counted as skipped");
+
+    // A packet with a broken CRC is dropped and the next one still arrives.
+    Bytes corrupt = first;
+    corrupt[10] ^= 1;
+    corrupt.insert(corrupt.end(), second.begin(), second.end());
+    PacketAssembler crc;
+    packets = assemble(crc, corrupt.data(), corrupt.size());
+    check(packets.size() == 1 && packets[0] == second, "a packet with a wrong CRC is skipped");
+
+    // More bytes than the buffer holds in one notification.
+    Bytes many;
+    for (int i = 0; i < 12; i++)
+        many.insert(many.end(), first.begin(), first.end());
+    PacketAssembler full;
+    check(many.size() > PacketAssembler::BUFFER_SIZE && assemble(full, many.data(), many.size()).size() == 12,
+          "a notification larger than the buffer loses no packet");
+
+    split.reset();
+    check(assemble(split, first.data() + 40, first.size() - 40).empty() && split.skipped_bytes() > 0,
+          "reset forgets a partial packet");
+}
+
 int main() {
     test_king_meter_requests();
     test_king_meter_profiles();
@@ -374,6 +482,8 @@ int main() {
     test_nus_parser_resync();
     test_nus_light_commands();
     test_crypto_packet_bounds();
+    test_nus_parser_frame_count();
+    test_crypto_packet_assembly();
     if (failures != 0) {
         printf("%d check(s) failed\n", failures);
         return 1;

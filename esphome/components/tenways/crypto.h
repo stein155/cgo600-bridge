@@ -17,6 +17,8 @@ static constexpr uint8_t KEY_HANDSHAKE_RANDOM = 0xD8;
 static constexpr uint8_t KEY_HANDSHAKE_IV = 0xD2;
 static constexpr size_t HANDSHAKE_VALUE_LEN = 16;
 static constexpr size_t PACKET_OVERHEAD = 8;  // 0xA5, len, seq, crc, 0x5A
+// Largest payload of a packet, encrypted or not; replies are far smaller.
+static constexpr size_t MAX_PACKET_PAYLOAD = 256;
 
 // HKDF-SHA256 with the app's random as salt, the app's fixed secret as input
 // key and the display's random as info.
@@ -46,6 +48,34 @@ class Session {
     uint8_t iv_[16]{};
     uint16_t sequence_{0};
     bool active_{false};
+};
+
+// Cuts the notification stream into packets. A packet that does not fit the
+// MTU arrives split over several notifications, and one notification can hold
+// more than one packet. Bytes that do not form a packet with a valid length,
+// CRC and end byte are skipped.
+class PacketAssembler {
+ public:
+    static constexpr size_t BUFFER_SIZE = MAX_PACKET_PAYLOAD + PACKET_OVERHEAD;
+
+    void reset();
+    // Appends notification bytes and returns how many fitted. Take every
+    // packet with next() before feeding the rest.
+    size_t feed(const uint8_t *data, size_t len);
+    // Returns the next complete packet and its length, or nullptr when more
+    // bytes are needed. The packet stays valid until the next call.
+    const uint8_t *next(size_t &len);
+    // Bytes skipped since the last reset because they were not part of a packet.
+    uint32_t skipped_bytes() const { return this->skipped_bytes_; }
+
+ private:
+    void drop_(size_t count);
+
+    uint8_t buffer_[BUFFER_SIZE]{};
+    size_t len_{0};
+    // Length of the packet next() returned last; dropped by the next call.
+    size_t returned_{0};
+    uint32_t skipped_bytes_{0};
 };
 
 }  // namespace esphome::tenways::protocol
