@@ -1,8 +1,8 @@
-<h1 align="center">🚲 Tenways Bridge</h1>
-
 <p align="center">
-  <b>Your Tenways e-bike in Home Assistant.</b><br>
-  An ESP32 in the shed reads the bike's display over Bluetooth, no app and no cloud.
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/assets/hero-dark.svg">
+    <img src="docs/assets/hero-light.svg" alt="Tenways Bridge. Your e-bike. Now in Home Assistant. Battery, odometer and every ride, without reaching for your phone. A Tenways bike, an ESP32 and Home Assistant in a row.">
+  </picture>
 </p>
 
 <p align="center">
@@ -16,28 +16,31 @@
   <a href="https://stein155.github.io/tenways-bridge/"><b>Web installer</b></a> ·
   <a href="#getting-started"><b>Getting started</b></a> ·
   <a href="#how-it-works"><b>How it works</b></a> ·
+  <a href="#troubleshooting"><b>Troubleshooting</b></a> ·
   <a href="docs/protocols.md"><b>Protocols</b></a> ·
   <a href="CONTRIBUTING.md"><b>Contribute</b></a>
 </p>
 
 ---
 
-Tenways bikes only talk to their own app, and only while your phone is next to the bike. **Tenways Bridge
-turns an ESP32 into a permanent listener.** When the bike is switched on in range, the bridge connects by
-itself, with no pairing and no MAC address, and Home Assistant gets the battery, the odometer, the trip and
-the light. Every ride ends up in a calendar.
+A Tenways bike only talks to its app, and only while your phone is next to it.
+
+**Tenways Bridge listens all the time.** It is a small ESP32 near where the bike is parked. Switch the bike
+on and the bridge connects by itself, with no pairing and no MAC address. Home Assistant gets the battery,
+the odometer, the trip and the light, and every ride ends up in a calendar.
 
 > [!NOTE]
 > Unofficial community project, not affiliated with or endorsed by Tenways. Use at your own risk.
 
 ## Why Tenways Bridge
 
-- **🔋 Know your battery before you leave.** The last known charge stays in Home Assistant after the bike
+- **🔋 Know before you go.** The last known charge stays in Home Assistant after the bike
   is switched off, and after the bridge restarts.
-- **🗓️ Every ride, automatically.** Distance, duration, average speed and battery use land in a Home
+- **🗓️ Every ride. Automatically.** Distance, duration, average speed and battery use land in a Home
   Assistant calendar, worked out from the odometer, so a ride counts even when the bridge missed the arrival.
-- **🏠 Local and yours.** ESPHome firmware on your own network. No account, no cloud, no app.
-- **🚲🚲 The whole household.** One bridge handles up to three bikes, each as its own Home Assistant device.
+- **🏠 Always home.** The bridge is always there, so the bike reports in whenever it is switched
+  on at home, whoever rides it and wherever your phone is.
+- **🚲 One bridge. Every bike.** Up to three bikes on one ESP32, each as its own Home Assistant device.
 
 ## What you get
 
@@ -63,6 +66,13 @@ the light. Every ride ends up in a calendar.
 
 Experimental displays get the requests the Tenways app uses, but have not been confirmed on a real bike.
 Logs from your bike are welcome in [issue #2](https://github.com/stein155/tenways-bridge/issues/2).
+
+## What you need
+
+- An **ESP32** board with Bluetooth, such as an ESP32 DevKit (`esp32dev`), and a USB cable and charger for it.
+  No wiring and nothing on the bike: the bridge only listens over Bluetooth.
+- A spot for it within Bluetooth range of where the bike is parked, and in reach of your WiFi.
+- [Home Assistant](https://www.home-assistant.io) with the ESPHome integration.
 
 ## Getting started
 
@@ -137,10 +147,20 @@ packages:
 
 A block only connects to a bike no other block holds.
 
-**Other bikes on the same ESP32.** Other ESPHome bike components that ship the same `scan_coordinator.h`,
-such as [b06-bridge](https://github.com/stein155/b06-bridge), run next to this one. Add both
-`external_components` entries and both blocks; scanning then keeps running until the bikes of both are
-connected, and stops while any of them is being set up.
+## The bike bridges
+
+Tenways Bridge is one of a family of ESPHome components that each speak one make of e-bike display, built
+to share a single ESP32:
+
+| Project | Bikes | |
+| --- | --- | --- |
+| **Tenways Bridge** (this repository) | Tenways CGO600, CGO800 and the other displays listed above | battery, odometer, trip, range, power, light, rides |
+| [**B06 Bridge**](https://github.com/stein155/b06-bridge) | B06 displays of the BIKEGO plus app, such as on Bafang conversions | battery, odometer, trip, light |
+
+A household with both kinds of bike needs one bridge, not two: add both `external_components` entries and
+both blocks to the same configuration. The components ship the same `scan_coordinator.h`, through which they
+share the radio: scanning keeps running until the bikes of both are connected, and stops while any of them
+is being set up.
 
 ## Home Assistant
 
@@ -175,6 +195,17 @@ period: week
 chart_type: bar
 ```
 
+## Troubleshooting
+
+| BLE status | What it means | What to try |
+| --- | --- | --- |
+| stays `searching` | The bridge does not see the bike. | Switch the bike on near the bridge. Close the Tenways app: a display accepts one connection. Check that the bike's Bluetooth name contains one of `device_names`. |
+| `connecting` or `handshake`, then back to `searching` | The bike is seen, but the connection does not hold. | Move the ESP32 closer to the bike, and away from metal and other 2.4 GHz devices. |
+| `connected`, but entities stay empty | The display does not answer the requests. | Likely an experimental display; share the logs in [issue #2](https://github.com/stein155/tenways-bridge/issues/2). |
+
+The logs tell the rest: `esphome logs <config> --device <bridge-ip>`, the ESPHome dashboard, or USB serial at
+115200 baud. [SUPPORT.md](SUPPORT.md) lists what to include in a bug report.
+
 ## Upgrading from cgo600-bridge
 
 Version 2 is a breaking release:
@@ -188,18 +219,41 @@ Version 2 is a breaking release:
 - WiFi credentials set through the installer or the hotspot are kept. A bridge whose credentials were
   compiled into its old firmware falls back to the *Tenways Bridge* hotspot after the update.
 
-## Development
+## For developers
+
+| Where | What |
+| --- | --- |
+| [`esphome/components/tenways/`](esphome/components/tenways) | the component: BLE client, the two protocols, the encrypted session (C++) and its ESPHome schema (Python) |
+| [`esphome/`](esphome) | the configuration the installer flashes, the per-bike package and the development configuration |
+| [`homeassistant/blueprints/`](homeassistant/blueprints) | the ride blueprint |
+| [`installer/`](installer) | the web installer page and the scripts that publish it |
+| [`tests/`](tests) | host tests of the protocol code: frames, parsing, encryption |
+| [`docs/`](docs) | the [protocol reference](docs/protocols.md) |
+
+You do not need a bike to work on the protocol code; the host tests run on any machine with a C++17 compiler
+and mbedtls:
 
 ```bash
-tests/run.sh                          # host tests of the protocol code (needs mbedtls)
+tests/run.sh                          # host tests of the protocol code
 ./lint.sh                             # clang-format, ruff, yamllint, shellcheck (requirements-lint.txt)
 esphome compile esphome/dev.yaml      # two bikes; copy esphome/secrets.yaml.example first
 esphome logs esphome/dev.yaml --device <bridge-ip>
 ```
 
-CI runs the linters and the host tests, and compiles `esphome/dev.yaml` and the installer configuration. See
-[CONTRIBUTING.md](CONTRIBUTING.md).
+CI runs the linters and the host tests, and compiles `esphome/dev.yaml` and the installer configuration.
+Only the protocol code has automated tests; everything else is verified on a real bike. Start with
+[CONTRIBUTING.md](CONTRIBUTING.md); releases follow [RELEASE.md](RELEASE.md).
 
-## License
+## Thanks
 
-[MIT](LICENSE)
+Tenways Bridge is built on [ESPHome](https://esphome.io) and [Home Assistant](https://www.home-assistant.io),
+and the installer on [ESP Web Tools](https://esphome.github.io/esp-web-tools/). The King Meter framing of the
+Longtail Duo was first documented by [tenways-ble](https://github.com/Styx85/tenways-ble).
+
+## Legal
+
+Tenways Bridge is licensed under the [MIT License](LICENSE).
+
+It is an independent project, **not affiliated with, endorsed by or sponsored by Tenways**. *Tenways* and the
+model names are trademarks of their owner, used only to identify the bikes the bridge works with. Use it at
+your own risk.
